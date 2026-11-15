@@ -59,7 +59,7 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
         yield
         stop.set()
 
-    app = FastAPI(title="OperateWithAI", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="OpsCrew-OperateWithAI", version=__version__, lifespan=lifespan)
     app.state.service = svc
     token, ids = os.environ.get("ADEF_API_TOKEN", ""), _identities()
 

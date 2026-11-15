@@ -1,4 +1,4 @@
-# DataCrew- OperateWithAI
+# OpsCrew-OperateWithAI
 
 AI agents and a human team running a **data platform managed service** together: monitoring,
 incidents, the nightly batch, service requests and service reporting for a client estate of
