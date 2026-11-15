@@ -57,3 +57,4 @@ details.ke summary { cursor: pointer; font-weight: 700; } details.ke summary .mu
 textarea.big { min-height: 260px; font-family: var(--sans); }
 @media (max-width: 900px) { .grow { grid-template-columns: 1fr; } .clockbar { padding: 8px 14px; } }
 main h2 { margin-top: 22px; }
+.stepn { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-2); color: var(--accent); font-size: 11px; font-weight: 700; margin-right: 8px; }

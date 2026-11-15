@@ -126,7 +126,7 @@ document.addEventListener("click", async (e) => {
 // ------------------------------------------------------------------ routing
 const routes = {};
 const AUTO = ["home", "inbox", "incidents", "ticket", "batch", "requests"];
-function current() { const [, name = "home", ...args] = location.hash.split("/"); return [routes[name] ? name : "home", args.map(decodeURIComponent)]; }
+function current() { const [, name = "team", ...args] = location.hash.split("/"); return [routes[name] ? name : "team", args.map(decodeURIComponent)]; }
 async function render(quiet) {
   const [name, args] = current();
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === (name === "ticket" ? "incidents" : name)));
@@ -443,7 +443,7 @@ function setMe(name) { store.set("owai_me", name); $("#personPick").value = name
   if (META.me) { pick.value = META.me; pick.disabled = true; } else {
     if (!META.people.some((p) => p.name === store.get("owai_me", ""))) {
       const o = await api("GET", "/overview");
-      store.set("owai_me", o.waiting[0]?.[0] || META.people[0].name);
+      store.set("owai_me", META.people.some((p) => p.name === "Oracle DBA") ? "Oracle DBA" : o.waiting[0]?.[0] || META.people[0].name);
     }
     pick.value = store.get("owai_me");
     pick.onchange = () => setMe(pick.value);
