@@ -1,0 +1,52 @@
+# Synthetic Utilities pack for the Demo Simulator. No vendor names; no real data.
+domain_pack:
+  id: utilities
+  severity_overrides:
+    # A Domain Pack may raise a severity, never lower it.
+    - match: {object_tag: regulated}
+      min_severity: S2
+      reason: Regulated operational dataset (settlement reads)
+handover_pack:
+  dp_id: util_meter_daily
+  name: Daily meter consumption
+  domain_pack: utilities
+  regulated: true
+  owners:
+    product_owner: Avery Product
+    service_owner: Sam Service
+    platform_owner: Pat Platform
+    data_steward: Dana Steward
+    data_owner: Olu Owner
+    security_compliance: Sec Compliance
+    release_manager: Rae Release
+    tech_lead: Tia Lead
+  on_call: Oncall Utilities
+  objectives:
+    - {id: OBJ-1, kind: freshness, object: mart.daily_consumption, target: 120, unit: minutes, description: Loaded by 06:00 (lag under 2h)}
+    - {id: OBJ-2, kind: completeness, object: raw.meter_interval_reads, target: 25, unit: pct_band, description: Row count within 25% of weekday band}
+    - {id: OBJ-3, kind: completeness, object: raw.outage_events, target: 25, unit: pct_band}
+  pipelines:
+    - id: meter_ingest
+      owner: Oncall Utilities
+      idempotent: true
+      rollback_ref: runbook#meter-ingest-rollback
+      objects: [raw.meter_interval_reads, curated.meter_interval, mart.daily_consumption]
+      schedule: "daily 04:00"
+    - id: outage_ingest
+      owner: Oncall Utilities
+      idempotent: true
+      rollback_ref: runbook#outage-rollback
+      objects: [raw.outage_events, curated.outages]
+      schedule: "hourly"
+      quarantine_path: quarantine.outage_events
+  quality_rules:
+    - {id: DQ-U1, object: curated.meter_interval, blocking: true, description: No negative interval reads}
+  consumers: [settlement-reporting, network-planning]
+  lineage:
+    - [raw.meter_interval_reads, curated.meter_interval]
+    - [curated.meter_interval, mart.daily_consumption]
+    - [raw.outage_events, curated.outages]
+  cost_estimate_daily: 40.0
+  access_model: ["role:util_reader SELECT mart.daily_consumption", "role:util_etl ALL raw.*"]
+  schema_contract:
+    raw.meter_interval_reads: {meter_id: string, interval_start: timestamp, kwh: decimal}

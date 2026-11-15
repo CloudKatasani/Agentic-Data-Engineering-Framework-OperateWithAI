@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adef-operate"
+version = "0.1.0"
+description = "Operate-With-AI: approval-gated operations team for live data products (ADEF suite)"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.5", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["adef_operate*"]
+
+[tool.setuptools.package-data]
+adef_operate = ["packs/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
