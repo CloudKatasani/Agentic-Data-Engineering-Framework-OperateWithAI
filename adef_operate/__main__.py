@@ -100,6 +100,12 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("guardrails", help="run guardrail scenarios OT-01 to OT-16")
     g.add_argument("--profile", default=None)
     g.add_argument("--home", type=Path, default=None)
+    rc = sub.add_parser("compare-reasoners", help="compare the rule reasoner with a model challenger on the fault library")
+    rc.add_argument("--model", default=None, help="model id (default ADEF_REASONER_MODEL or claude-opus-5-5)")
+    rc.add_argument("--effort", default=None)
+    rc.add_argument("--profile", default=None)
+    rc.add_argument("--confirm-spend", action="store_true", help="required: the model run is billed")
+    rc.add_argument("--out", type=Path, default=None)
     e = sub.add_parser("evals", help="run the replay harness over the fault library")
     e.add_argument("--profiles", default="canonical", help="comma list, or 'all'")
     e.add_argument("--out", type=Path, default=None)
@@ -157,6 +163,23 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"Console: http://{args.host}:{args.port}/   API docs: http://{args.host}:{args.port}/docs   home: {home}")
         uvicorn.run(create_app(home), host=args.host, port=args.port, log_level="warning")
+        return 0
+    if args.cmd == "compare-reasoners":
+        from .agents.model_reasoner import DEFAULT_EFFORT, DEFAULT_MODEL, FallbackReasoner, ModelReasoner
+        from .evals.reasoners import compare_reasoners, estimate_usd, library_runs, render
+        model = args.model or os.environ.get("ADEF_REASONER_MODEL", DEFAULT_MODEL)
+        effort = args.effort or os.environ.get("ADEF_REASONER_EFFORT", DEFAULT_EFFORT)
+        est = estimate_usd(model, library_runs())
+        if not args.confirm_spend:
+            print(f"This makes {library_runs()} {model} calls at effort {effort}: roughly ${est:.2f} "
+                  "(estimate; billed to your Anthropic account). Re-run with --confirm-spend to proceed.")
+            return 2
+        res = compare_reasoners(lambda: FallbackReasoner(ModelReasoner(model=model, effort=effort)),
+                                profile=args.profile)
+        text = render(res, f"model:{model}")
+        if args.out:
+            args.out.write_text(text)
+        print(text)
         return 0
     if args.cmd == "start-here":
         from .engine.shadow import start_here_template

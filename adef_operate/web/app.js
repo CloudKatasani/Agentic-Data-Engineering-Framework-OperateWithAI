@@ -238,7 +238,9 @@ route("case", async (dp, id) => {
     diagnosis: () => (dg ? `<div class="grid g2"><div class="card"><h2>Conclusion</h2><div class="kv">
       <div class="k">Cause class</div><div><b>${esc(dg.cause_class)}</b></div><div class="k">Confidence</div><div>${badge(dg.confidence)}</div>
       <div class="k">Statement</div><div>${esc(dg.statement)}</div><div class="k">Would confirm</div><div>${esc(dg.confirm_by)}</div>
-      <div class="k">Reasoner</div><div class="small">${esc(dg.reasoner)}</div></div>
+      <div class="k">Reasoner</div><div class="small">${esc(dg.reasoner)}${dg.reasoner_note && !String(dg.reasoner).includes(dg.reasoner_note) ? `<div class="muted">${esc(dg.reasoner_note)}</div>` : ""}</div>
+      ${dg.model_cost_usd ? `<div class="k">Model cost</div><div class="small">${"$"}${Number(dg.model_cost_usd).toFixed(4)} (daily model budget)</div>` : ""}
+      ${dg.challenger ? `<div class="k">Challenger</div><div class="small">${esc(dg.challenger.reasoner)}: <b>${esc(dg.challenger.cause_class)}</b> (${esc(dg.challenger.confidence)}) ${dg.challenger.agrees ? badge("approved", "agrees") : badge("rejected", "disagrees")}<div class="muted">Recorded for comparison; not used for the conclusion.</div></div>` : ""}</div>
       ${dg.council_required ? `<div class="notice warn" style="margin-top:10px">S1: council-of-three review ${badge(d.council_status)}. Options wait for a majority.</div>` : ""}
       ${dg.untrusted_reports?.length ? `<div class="notice bad" style="margin-top:10px">Instruction-like text in logs was treated as data and not followed:<br>${dg.untrusted_reports.map(esc).join("<br>")}</div>` : ""}</div>
       <div class="card"><h2>Evidence (metadata only)</h2>${table(["ID", "Evidence", "Summary"], d.evidence.map((e) => `<tr><td class="mono small">${esc(e.id)}</td><td><b>${esc(e.kind)}</b><div class="small muted">${esc(e.source)}</div></td><td class="small" style="min-width:45%">${esc(e.summary)}${e.untrusted ? ` ${badge("", "untrusted", "b-violet")}` : ""}</td></tr>`))}</div></div>

@@ -83,6 +83,38 @@ localhost without one of these:
 Guard refusals come back as `409` with `guardrail: true` and the reason. A wrong or agent
 approver gets `403`.
 
+## Model-backed diagnosis (optional)
+
+The deterministic rule reasoner is the default. A Claude-backed reasoner can sit behind the
+same `Reasoner` seam (`agents/model_reasoner.py`):
+
+```bash
+pip install -e ".[model]"
+```
+
+| `ADEF_REASONER` | Effect |
+|---|---|
+| `rule` (default) | Rule reasoner only. No data leaves the platform. |
+| `challenger` | The rule reasoner decides; the model runs on the same evidence and its conclusion is recorded for comparison (case room, `diagnosis.md`, shadow report). |
+| `model` | The model decides; it falls back to the rule reasoner on any failure and records why. |
+
+`ADEF_REASONER_MODEL` defaults to `claude-opus-5-5`, and `ADEF_REASONER_EFFORT` to `high`.
+Credentials come from the Anthropic SDK's usual sources.
+
+Safeguards:
+- **What is sent.** Metadata-only evidence, with emails, IPs and long numbers redacted and each item size-capped.
+- **Untrusted text.** Log and ticket text is marked untrusted; any instructions found in it are reported back, never followed.
+- **No tools.** The model has no tools; it returns a JSON document under a strict schema.
+- **Same rules.** The agent applies the same contract to the model's output as to the rule reasoner's: citations must exist, no cause without evidence, and a recent change is a lead, not a cause.
+- **Refusals.** Server-side refusal fallback is on.
+- **Cost.** Charged to the product's daily `model_spend` budget. A stopped product makes no model calls.
+
+Compare the two on the fault library before switching (billed; the command prints an estimate and refuses to run without the flag):
+
+```bash
+python -m adef_operate compare-reasoners --confirm-spend
+```
+
 ## Quick start
 
 ```bash

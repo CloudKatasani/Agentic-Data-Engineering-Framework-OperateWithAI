@@ -213,9 +213,18 @@ def shadow_report(ws: Workspace) -> dict:
         h = by_case.get(c.id)
         d = ws.read_yaml(f"cases/{c.id}/diagnosis.yaml") or {}
         if h and h.get("cause_class") and h["cause_class"] != "unknown" and d:
+            ch = d.get("challenger") or {}
             pairs.append({"case": c.id, "ticket": h.get("ticket"), "agent": d.get("cause_class"),
-                          "human": h["cause_class"], "match": d.get("cause_class") == h["cause_class"]})
+                          "human": h["cause_class"], "match": d.get("cause_class") == h["cause_class"],
+                          "reasoner": d.get("reasoner"), "challenger": ch.get("cause_class"),
+                          "challenger_reasoner": ch.get("reasoner"),
+                          "challenger_match": (ch.get("cause_class") == h["cause_class"]) if ch else None})
     accuracy = round(sum(p["match"] for p in pairs) / len(pairs), 3) if pairs else None
+    ch_pairs = [p for p in pairs if p["challenger_match"] is not None]
+    challenger_accuracy = round(sum(p["challenger_match"] for p in ch_pairs) / len(ch_pairs), 3) if ch_pairs else None
+    model_cost = 0.0
+    for c in incs:
+        model_cost += float((ws.read_yaml(f"cases/{c.id}/diagnosis.yaml") or {}).get("model_cost_usd") or 0.0)
     unsupported = 0
     for c in incs:
         d = ws.read_yaml(f"cases/{c.id}/diagnosis.yaml") or {}
@@ -255,7 +264,12 @@ def shadow_report(ws: Workspace) -> dict:
         "synthetic": svc.get("data_origin") != "real-export", "period": [days[0], days[-1]] if days else [],
         "days": span, "snapshots": len(tk), "agent_cases": len(incs), "judged": len(judged),
         "judged_share": judged_share, "alert_precision": precision, "diagnosis_pairs": pairs,
-        "diagnosis_accuracy": accuracy, "unsupported_causes": unsupported, "missed_tickets": missed,
+        "diagnosis_accuracy": accuracy, "unsupported_causes": unsupported,
+        "challenger": {"incidents": len(ch_pairs), "accuracy": challenger_accuracy,
+                       "agreement": round(sum(p["challenger"] == p["agent"] for p in ch_pairs) / len(ch_pairs), 3)
+                       if ch_pairs else None,
+                       "reasoner": next((p["challenger_reasoner"] for p in ch_pairs), None)},
+        "model_cost_usd": round(model_cost, 4), "missed_tickets": missed,
         "agent_lead_minutes": lead, "human_minutes_per_case": round(sum(minutes) / len(minutes), 1) if minutes else None,
         "guardrail_violations": violations, "baseline": base,
         "decision": "go" if not reasons else "no-go", "reasons": reasons,
@@ -282,10 +296,15 @@ def write_report(ws: Workspace, rep: dict) -> str:
              f"| Agent detection ahead of the team's ticket (min) | "
              f"{(sum(lead) / len(lead)) if lead else '-'} average | reported |",
              f"| Human minutes per case | {rep['human_minutes_per_case']} | tracked |",
+             *([f"| Challenger accuracy ({rep['challenger']['reasoner']}) | {rep['challenger']['accuracy']} over "
+                f"{rep['challenger']['incidents']} incident(s); agrees with the deciding reasoner "
+                f"{rep['challenger']['agreement']} | compare before switching |"] if rep.get("challenger", {}).get("incidents") else []),
+             *([f"| Model cost (diagnosis) | ${rep['model_cost_usd']:.2f} | within the daily model budget |"] if rep.get("model_cost_usd") else []),
              f"| Baseline (START HERE) | {rep['baseline']} | comparison |", "",
-             "## Agent diagnosis against the team's conclusion", "| Case | Ticket | Agent | People | Match |",
-             "|---|---|---|---|---|",
-             *[f"| {p['case']} | {p['ticket'] or '-'} | {p['agent']} | {p['human']} | {'yes' if p['match'] else 'NO'} |"
+             "## Agent diagnosis against the team's conclusion",
+             "| Case | Ticket | Agent | People | Match | Challenger |", "|---|---|---|---|---|---|",
+             *[f"| {p['case']} | {p['ticket'] or '-'} | {p['agent']} | {p['human']} | {'yes' if p['match'] else 'NO'} | "
+               f"{(p['challenger'] + (' (match)' if p['challenger_match'] else ' (MISS)')) if p.get('challenger') else '-'} |"
                for p in rep["diagnosis_pairs"]], "",
              "## Why not go" if rep["reasons"] else "## All go-live conditions met",
              *[f"- {r}" for r in rep["reasons"]], "",

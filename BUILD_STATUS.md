@@ -281,6 +281,34 @@ are not available in this environment.
   - A cost group that kept firing was re-routed on every tick, so FinOps raised a duplicate finding each time. The Commander now routes a group once, and FinOps never re-raises an open finding.
   - The approvals form prefilled the last name typed instead of the role's named holder.
 
+## Model-backed diagnosis reasoner
+
+- **`ModelReasoner`** (`agents/model_reasoner.py`) is a Claude reasoner behind the Day 7 `Reasoner` seam. It uses the Anthropic SDK with `claude-opus-5-5` at effort `high` and adaptive thinking, by default.
+  - Structured output: a strict JSON schema of hypotheses that cite evidence IDs.
+  - A cached system prompt that defines the seven cause classes and treats evidence as untrusted.
+  - Server-side refusal fallback (`fallbacks="default"`).
+- **Data minimisation.** Evidence is metadata only. Free text is redacted (emails, IPs, card-like and long numbers) and each item is capped at 4,000 characters before sending.
+- **The agent decides, not the model.** `DiagnosisAgent._contract` now applies to every reasoner:
+  - citations must name existing evidence;
+  - "supported" needs a citation and a positive score;
+  - a code-defect cause supported only by change history needs a failing signal on a changed object (spec 13.1).
+
+  Any of these failing gives "unknown".
+- **Failure is safe.** `FallbackReasoner` uses the rule reasoner on an API error, refusal, truncation or schema mismatch, and records why. A stopped product (emergency stop or exhausted budget) makes no model call.
+- **Cost.** Each call is priced from its `usage` at the serving model's rates and charged to the daily `model_spend` budget. Exceeding it sets the product to L0 and escalates (OT-15).
+- **Challenger mode** (`ADEF_REASONER=challenger`). The rule reasoner decides and the model's conclusion is recorded alongside. The shadow report scores both against people's conclusions, and `compare-reasoners` does the same on the fault library. This is the "measure before switching" path. No model has been run against the library in this environment: there are no credentials here, and every run is billed.
+- **Tests** (`tests/test_model_reasoner.py`) use a fake client that records requests:
+  - request shape and redaction;
+  - contract enforcement on model output;
+  - each failure path and the server-side fallback naming;
+  - injection reporting;
+  - stop and budget behaviour;
+  - challenger recording;
+  - shadow scoring;
+  - library comparison;
+  - configuration;
+  - a real SDK client failing cleanly with no reachable API.
+
 ## Assumptions made during the build (please confirm)
 
 | # | Assumption | Where |
@@ -318,6 +346,8 @@ are not available in this environment.
 | A31 | A case ID is unique per product. `GET /ops/cases/{id}` resolves it across the fleet and asks for `?dp=` when two products share the ID (409). | `api/fleet.py` |
 | A32 | Demo Simulator state is kept outside the ops workspaces (`<home>/demo-sim/`) and restored on restart. Real products never have simulator state. | `api/fleet.py` |
 | A33 | Lifting an emergency stop is a person's action, recorded in every affected product's escalation log. It needs no gate (stopping is the safe direction). | `api/fleet.py` |
+| A34 | The model reasoner is off by default. Enabling it sends metadata-only, redacted evidence to the Anthropic API. Each client confirms that is acceptable under their data policy before setting `ADEF_REASONER`. | `agents/model_reasoner.py` |
+| A35 | The recommended switch path is `challenger` mode during shadow, then `model` only if its accuracy against people's conclusions is at least the rule reasoner's. | `engine/shadow.py` |
 
 ## Next
 
@@ -325,7 +355,7 @@ The ten-day plan is complete apart from the real shadow period itself.
 
 1. **Start the real shadow period (O5-3).** This needs your START HERE answers, the handover pack for a non-production product, and daily exports. Then run two weeks and review the report.
 2. **Live API clients (O3-2) for the chosen profile**, each with its conformance test. These are only needed after go-live.
-3. **Model-backed reasoner** behind the Diagnosis `Reasoner` seam. Measure it against the rule reasoner on the shadow replays before switching.
+3. **Measure the model reasoner.** Run `compare-reasoners --confirm-spend` (about $0.91 for the library at the default model and effort), then run challenger mode through the shadow period before choosing `ADEF_REASONER=model`.
 
 ## Open questions (START HERE FIRST)
 
