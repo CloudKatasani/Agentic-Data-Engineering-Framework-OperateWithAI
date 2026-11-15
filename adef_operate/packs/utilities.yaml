@@ -54,5 +54,11 @@ handover_pack:
     mart.daily_consumption: [regulated]
   restricted_columns:
     raw.meter_interval_reads: [meter_id]
+  masking_policies:
+    raw.meter_interval_reads.meter_id: mask-hash-v1
+  retention_days:
+    raw.meter_interval_reads: 400
+    raw.outage_events: 400
+  privileged_roles: [role:util_etl]
   schema_contract:
     raw.meter_interval_reads: {meter_id: string, interval_start: timestamp, kwh: decimal}

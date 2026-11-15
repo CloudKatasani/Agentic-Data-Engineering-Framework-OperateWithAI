@@ -60,6 +60,9 @@ class HandoverPack(_Model):
     schema_contract: dict[str, dict[str, str]] = Field(default_factory=dict)
     object_tags: dict[str, list[str]] = Field(default_factory=dict)
     restricted_columns: dict[str, list[str]] = Field(default_factory=dict)
+    masking_policies: dict[str, str] = Field(default_factory=dict)
+    retention_days: dict[str, int] = Field(default_factory=dict)
+    privileged_roles: list[str] = Field(default_factory=list)
     build_g7_autonomy: dict[str, str] = Field(default_factory=dict)
 
 

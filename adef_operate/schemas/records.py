@@ -110,6 +110,8 @@ class Case(_Strict):
     signal_group: Optional[str] = None
     first_failing_object: Optional[str] = None
     severity_would_lower: Optional[str] = None
+    confirmed_cause: Optional[str] = None
+    confirmed_by: Optional[str] = None
     linked_cases: list[LinkedCase] = Field(default_factory=list)
     detecting_monitors: list[MonitorRef] = Field(default_factory=list)
     trust_status: Optional[TrustStatus] = None

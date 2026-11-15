@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .agents import CommanderAgent, DiagnosisAgent, RemediationAgent
+from .agents import (CommanderAgent, DiagnosisAgent, FinOpsAgent, GovernanceAgent, KnowledgeAgent,
+                     RemediationAgent)
 from .connectors.simulator import FAULTS, SIM_NOW, SimulatorAdapter
 from .engine.approvals import Approvals
 from .engine.workspace import Workspace
@@ -59,6 +60,18 @@ class Scenario:
     @property
     def remediation(self) -> RemediationAgent:
         return RemediationAgent(self.ws, self.sim)
+
+    @property
+    def finops(self) -> FinOpsAgent:
+        return FinOpsAgent(self.ws, self.sim, self.commander)
+
+    @property
+    def governance(self) -> GovernanceAgent:
+        return GovernanceAgent(self.ws, self.sim, self.commander)
+
+    @property
+    def knowledge(self) -> KnowledgeAgent:
+        return KnowledgeAgent(self.ws, self.sim, self.commander)
 
 
 def diagnosis_accuracy(home: str | Path) -> dict:

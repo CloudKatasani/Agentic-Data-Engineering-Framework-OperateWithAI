@@ -184,6 +184,28 @@ class CommanderAgent:
                           trust_status=status)
         return status
 
+    # -- T4: approvals on behalf of the owning agent ---------------------------------------
+    def request_approval(self, *, gate: str, decision_asked: str, artifact_hash: str, owner_agent: str,
+                         case_id: Optional[str] = None, evidence=(), risk: str = "", rollback: str = "",
+                         recommendation: str = "", role_key: Optional[str] = None):
+        """One request per decision. Refuses while stopped and refuses a duplicate open request."""
+        stop = self.registry.stop_state()
+        if stop:
+            raise ExecutorBlocked(f"stopped ({stop}); the Commander requests nothing")
+        appr = Approvals(self.ws)
+        for r in appr._records("request"):
+            if r["artifact_hash"] == artifact_hash and r["gate"] == gate and appr.status(r["id"]) == "pending":
+                return appr.get_request(r["id"])
+        return appr.request(gate=gate, decision_asked=decision_asked, artifact_hash=artifact_hash,
+                            requested_by=self.identity, case_id=case_id, evidence=evidence, risk=risk,
+                            rollback=rollback, recommendation=f"{owner_agent}: {recommendation}".strip(": "),
+                            role_key=role_key)
+
+    # -- T6: close ------------------------------------------------------------------------
+    def close(self, case_id: str) -> None:
+        """Close only when verification and the post-incident note exist (case-store guards)."""
+        self.cases.transition(case_id, "closed", by=self.identity, note="verification and post-incident note present")
+
     # -- T5 ---------------------------------------------------------------------------
     def publish_health(self, day: Optional[str] = None, *, now: Optional[datetime] = None) -> str:
         now = now or datetime.now(timezone.utc)

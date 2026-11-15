@@ -6,12 +6,13 @@ the eight agent contracts are in [`skills/`](skills/) (unpacked from
 `operate-with-ai-skills.zip`).
 
 **Detection is code and judgement is agents.** The deterministic runtime enforces the
-guardrails in spec section 8 outside the prompts. Five agents are built so far:
-Commander, Service Onboarding, Signal Sentinel, Incident Diagnosis and Remediation.
+guardrails in spec section 8 outside the prompts. All eight agents are built: Commander, Service Onboarding, Signal Sentinel, Incident
+Diagnosis, Remediation, FinOps and Performance, Governance and Compliance, and Problem
+and Knowledge.
 
 ## Status
 
-Days 1 to 7 of the ten-day plan are built and tested: Epics O1 and O2, O3-1, O3-3, and O4-1 to O4-4. See [`BUILD_STATUS.md`](BUILD_STATUS.md) for the backlog item by item, the guardrail
+Days 1 to 8 of the ten-day plan are built and tested: Epics O1 and O2, O3-1, O3-3, and all of Epic O4. See [`BUILD_STATUS.md`](BUILD_STATUS.md) for the backlog item by item, the guardrail
 scenarios already covered, the assumptions made, and what comes next.
 
 ## Quick start
@@ -42,6 +43,7 @@ Commander opening, routing or batching the case.
 ```
 adef_operate/
   agents/      commander.py, onboarding.py, sentinel.py, diagnosis.py, remediation.py,
+               finops.py, governance.py, knowledge.py,
                reasoning.py (Reasoner seam and deterministic RuleReasoner)
   simulation.py  golden-product scenarios and the diagnosis accuracy evaluation
   runtime.py   one control-plane tick: monitor engine -> Sentinel -> Commander
@@ -67,5 +69,5 @@ adef_operate/
   packs/       synthetic Utilities and Telco Domain Packs and golden handover packs
   api/         (next: section 11 endpoints)
 skills/        eight SKILL.md contracts (validated by adef_operate.skills_check)
-tests/         foundation, control, signals, day 6 and day 7 agents, skills
+tests/         foundation, control, signals, day 6 to day 8 agents, skills
 ```

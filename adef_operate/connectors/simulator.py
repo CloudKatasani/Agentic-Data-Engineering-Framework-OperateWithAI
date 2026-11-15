@@ -88,6 +88,14 @@ class SimulatorAdapter(OperateAdapter):
             "cost": {"daily": round(pack["cost_estimate_daily"] * 0.9, 2),
                      "estimate": pack["cost_estimate_daily"], "full_scans": 0},
             "grants": list(pack.get("access_model", [])),
+            "masking": dict(pack.get("masking_policies", {})),
+            "retention": dict(pack.get("retention_days", {})),
+            "catalog_tags": {o: list(t) for o, t in pack.get("object_tags", {}).items()},
+            "catalog_objects": sorted(objects),
+            "role_usage": {g.split()[0]: 1 for g in pack.get("access_model", [])},
+            "audit_logging": {"enabled": True, "gaps": []},
+            "object_reads": {o: (0 if o.startswith("raw.") else 1) for o in objects},
+            "partitioning": {o: "event_date" for o in objects if not o.startswith("raw.")},
             "releases": [], "upstream_notices": [], "trust_status": "trusted",
             "batches": ({"B-20260105-05": {"object": "raw.outage_events", "rows": 1_200, "checksum": "c9f1-05",
                                            "quarantined": False}} if pack_name == "utilities" else {}),
@@ -167,8 +175,10 @@ class SimulatorAdapter(OperateAdapter):
             s["cost"]["daily"] = round(s["cost"]["estimate"] * 2.5, 2)
             s["cost"]["full_scans"] = 1
             s["cost"]["top_object"] = "curated.meter_interval" if pack == "utilities" else "curated.usage_by_region"
+            s["cost"]["top_pipeline"] = "meter_ingest" if pack == "utilities" else "usage_ingest"
         elif fault_id == "F-07":
             s["grants"].append("role:temp_contractor SELECT raw.*")
+            s["role_usage"]["role:temp_contractor"] = 0
         elif fault_id == "F-08":
             pipe = "meter_ingest" if pack == "utilities" else "billing_ingest"
             runs[pipe].update(status="failed", logs=[INJECTION_TEXT])
@@ -275,6 +285,39 @@ class SimulatorAdapter(OperateAdapter):
         c = self._p(product)["cost"]
         return {"full_scans": c["full_scans"], "top_object": c.get("top_object"),
                 "daily_cost": c["daily"], "estimate": c["estimate"]}
+
+    # -- FinOps reads (billing, usage, layout) --------------------------------------------------
+    def cost_breakdown(self, product: str) -> dict:
+        c = self._p(product)["cost"]
+        base = round(c["estimate"] * 0.9, 2)
+        extra = round(c["daily"] - base, 2)
+        pipes = list(self._p(product)["runs"])
+        per_pipe = {p: round(base * 0.8 / len(pipes), 2) for p in pipes}
+        if extra > 0 and c.get("top_pipeline"):
+            per_pipe[c["top_pipeline"]] = round(per_pipe[c["top_pipeline"]] + extra, 2)
+        return {"day": self.now.date().isoformat(), "total": c["daily"], "estimate": c["estimate"],
+                "components": {"compute": round(base * 0.8 + max(extra, 0), 2), "storage": round(base * 0.15, 2),
+                               "other": round(base * 0.05, 2)},
+                "pipelines_compute": per_pipe, "unallocated": 0.0}
+
+    def query_profile(self, product: str) -> dict:
+        c = self._p(product)["cost"]
+        top = c.get("top_object")
+        return {"full_scans": c["full_scans"], "object": top,
+                "bytes_scanned_ratio": 25.0 if c["full_scans"] else 1.0,
+                "partitioned_by": self._p(product)["partitioning"].get(top) if top else None,
+                "filter_on_partition": not c["full_scans"]}
+
+    def object_reads(self, product: str, window_days: int = 90) -> dict[str, int]:
+        """Reads per object in the window from query history (telemetry)."""
+        return dict(self._p(product)["object_reads"])
+
+    # -- Governance reads (grants, policies, tags, retention, audit) --------------------------
+    def governance_state(self, product: str) -> dict:
+        s = self._p(product)
+        return {"grants": list(s["grants"]), "masking": dict(s["masking"]), "retention": dict(s["retention"]),
+                "tags": {k: list(v) for k, v in s["catalog_tags"].items()}, "objects": list(s["catalog_objects"]),
+                "role_last_used_days": dict(s["role_usage"]), "audit_logging": dict(s["audit_logging"])}
 
     def profile(self, product: str, obj: str, column: str) -> dict:
         """Column statistics only. There is no call that returns row values."""

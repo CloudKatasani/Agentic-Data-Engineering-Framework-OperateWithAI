@@ -51,5 +51,11 @@ handover_pack:
     mart.billing_summary: [billing]
   restricted_columns:
     raw.billing_accounts: [msisdn_hash]
+  masking_policies:
+    raw.billing_accounts.msisdn_hash: mask-hash-v1
+  retention_days:
+    raw.usage_records: 365
+    raw.billing_accounts: 365
+  privileged_roles: [role:telco_etl]
   schema_contract:
     raw.billing_accounts: {account_id: string, plan_code: string, msisdn_hash: string}

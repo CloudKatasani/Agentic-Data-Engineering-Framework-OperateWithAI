@@ -214,7 +214,7 @@ def test_access_drift_escalated_not_actioned(u):
     o = u.tick()["outcomes"][0]
     assert o["outcome"] == "routed" and o["routed_to"] == "adef-ops-governance-compliance"
     assert any(e["to"] == "security_compliance" for e in escalations(u.ws))
-    assert u.commander.cases.all() == []
+    assert [c.type for c in u.commander.cases.all()] == ["GOV"]  # Governance's finding; no INC
     assert u.sim.state[u.dp]["action_calls"] == []
 
 

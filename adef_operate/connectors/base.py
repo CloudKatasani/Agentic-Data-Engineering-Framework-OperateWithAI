@@ -76,6 +76,18 @@ class OperateAdapter(ABC):
     def profile(self, product: str, obj: str, column: str) -> dict:
         return {}
 
+    def cost_breakdown(self, product: str) -> dict:
+        return {}
+
+    def query_profile(self, product: str) -> dict:
+        return {}
+
+    def object_reads(self, product: str, window_days: int = 90) -> dict[str, int]:
+        return {}
+
+    def governance_state(self, product: str) -> dict:
+        return {}
+
     def read(self, signal_class: str, product: str, monitor: dict) -> dict:
         spec = self.signals.get(signal_class)
         if spec is None:

@@ -28,7 +28,9 @@ connected (step 4). Every action type starts at L1 (step 5).
 | O4-2 | Sentinel | Done (Day 6) | `test_f03_one_group_not_one_per_downstream_table`, `test_one_group_per_fault` (12 fault and pack pairs) |
 | O4-3 | Diagnosis | Done (Day 7) | `test_exit_check_cause_class_on_library_faults`: 8 of 8 faults (12 of 12 fault and pack pairs), 0 unsupported causes |
 | O4-4 | Remediation at L1 | Done (Day 7) | `test_options_ranked_with_approval_needs`, `test_l1_recovery_flow_with_verification_record` |
-| O4-5 to O4-7 | FinOps, Governance, Problem and Knowledge | Not started | - |
+| O4-5 | FinOps | Done (Day 8) | `test_f06_found_with_saving_arithmetic` (both packs), `test_finops_decision_and_realised_saving_in_ledger` |
+| O4-6 | Governance | Done (Day 8) | `test_f07_found_and_no_action_taken` (both packs) |
+| O4-7 | Problem and Knowledge | Done (Day 8) | `test_post_incident_note_replay_and_close`, `test_autonomy_proposal_from_platform_track_record` |
 | O5-1 to O5-4 | Evaluation and launch | Not started | - |
 | Section 11 | API and console | Not started | - |
 
@@ -97,6 +99,47 @@ Options are ranked with their approval needs, and recovery produces a verificati
   - Verification re-runs the detecting monitors and writes `verification.md` citing monitor result IDs. The result feeds the earned-autonomy track record, so a failure demotes.
 - **Scenarios** (`simulation.py`): a reusable golden-product scenario and `diagnosis_accuracy()`, which the Day 9 replay harness will build on.
 
+**Day 8 exit check** (F-06 and F-07 found; replay added): passes. F-06 yields a `FIN` with the
+saving arithmetic shown, on both packs. F-07 yields a `GOV` with escalation to Security and
+Compliance and no agent action, on both packs. A recovered incident gets a post-incident
+note, a scored evaluation replay, and a guarded close.
+
+## Day 8: what the agents do
+
+All three are recommend-only. Every change they want goes to the Commander as a single
+gate request: OG4 for FinOps, OG5 for Governance, OG7 for Knowledge. The Commander requests
+nothing while stopped, and does not duplicate an open request for the same artifact.
+
+- **FinOps** (`agents/finops.py`) wakes when the Commander routes a cost group (the runtime does this).
+  - Compares actual against estimate, split by component and by pipeline, with unallocated spend on its own line and a month forecast.
+  - Explains a material variance (over 20 percent) with evidence, or states it is unexplained with the next check.
+  - One `FIN` per finding, with the saving arithmetic written out and shown as a range with confidence. Each also states risk to objectives, effort, reversibility, action class and who would execute. Code fixes go to Build as a CHG after OG4.
+  - "Unused" needs telemetry, Consume usage and lineage to agree. A drop is A3 at OG4.
+  - A cost spike on an object with an open incident is linked to that case, not duplicated.
+  - Decisions (accepted, rejected or deferred) and the realised saving after one cycle go into `finops/savings-ledger.csv`.
+- **Governance** (`agents/governance.py`) checks live controls against the approved baseline in the handover pack. Each control is reported as matching, drifted, waived or not verifiable:
+  - grants against the access model;
+  - dormant privileged roles;
+  - masking on Restricted columns (policy hash);
+  - classification of new objects (unclassified is treated as Restricted);
+  - retention;
+  - audit-logging gaps.
+
+  Further rules:
+  - One `GOV` per drift, with live and approved values, the correction's consumer impact and the decision owner.
+  - Suspected exposure is escalated at once and collection stops.
+  - Waivers are OG5 approvals tied to the drift's hash. An expired waiver is itself a finding.
+  - Corrections are executed by people, then re-checked and recorded.
+  - It also produces evidence packs (with hash-chain verification of the control logs and a "not covered" section) and an entitlements CSV.
+- **Problem and Knowledge** (`agents/knowledge.py`):
+  - **Post-incident notes:** timeline from the case, executor, approval and escalation logs, plus impact and cause. The cause is the human-confirmed one, or the agent's diagnosis marked UNCONFIRMED, and the note records match, partial or miss.
+  - **Detection gap and prevention:** the note states the detection gap and lists prevention actions, each with a named owner, a due date and a verification. "What worked" and luck are left for people to write.
+  - **Close:** the Commander's close uses the case-store guards.
+  - **Replays:** each confirmed incident becomes an evaluation replay under `evals/replays/` with metadata only. Unconfirmed causes are kept but not scored.
+  - **Problems:** opens a `PRB` when the same object fails 3 times in 30 days, or a cause class recurs.
+  - **Proposals:** runbook changes (with the hash they would replace) and autonomy changes, computed from the platform's action log. Promotion needs 5 approved L2 executions, all verified; any failure or block leads to demotion. These are proposals only: the level changes when OG7 is approved.
+  - **Monthly review:** writes the monthly operations review.
+
 ## Guardrail scenarios (section 13.2)
 
 | # | Covered by enforcement code now | Test |
@@ -138,13 +181,17 @@ Options are ranked with their approval needs, and recovery produces a verificati
 | A15 | Council of three: three distinct reviewers who are not team agents. A majority of two agreeing unlocks options for an S1. | `engine/council.py` |
 | A16 | Diagnosis evidence read costs 0.05 diagnostic-budget units per read. | `engine/evidence.py` |
 | A17 | The "wait" option counts as an attempt. If the monitors still fail at verification, that is one failed attempt toward the cap of two. | `agents/remediation.py` |
+| A18 | FinOps material variance tolerance is 20 percent. A finding needs a saving of at least 10 per month; smaller ones become a summary line. Saving range: 80 to 100 percent of the excess, times 30 days. | `agents/finops.py` |
+| A19 | Governance treats a grant outside the model as suspected exposure when it reaches a Restricted object, uses a privileged role, or carries ALL, OWNER or ADMIN. Dormant means unused for 90 days. | `agents/governance.py` |
+| A20 | A human-confirmed cause is recorded on the case by a person named in `service.yaml`. Only confirmed replays are scored. | `agents/knowledge.py` |
+| A21 | A recurrence problem is opened at 3 failures of one object in 30 days, or 2 incidents of the same cause class in 30 days. | `agents/knowledge.py` |
 
-## Next (Days 8 to 10)
+## Next (Days 9 and 10)
 
-1. Day 8, O4-5 to O4-7: FinOps (F-06 found, saving arithmetic shown), Governance (F-07 found, no action), and Problem and Knowledge (post-incident note, replay added to evaluations, case closure).
+1. Day 9, O5-1 and O5-2: replay harness over the fault library (building on `simulation.py` and `evals/replays/`), the full OT-01 to OT-16 suite, and O3-4 rebind to a second profile.
 2. Sentinel weekly noise report and OG7 tuning proposals. Commander rejection and return counters (2 rejections or 3 returns lead to escalation).
-3. O5-1 and O5-2: replay harness over the fault library, and the full OT-01 to OT-16 suite.
-4. Section 11 API and console, O3-2 real adapter, O3-4 rebind.
+3. Section 11 API and console, O3-2 real adapter.
+4. Day 10, O5-3: shadow mode on a real non-production product (needs the START HERE answers).
 
 ## Open questions (START HERE FIRST)
 

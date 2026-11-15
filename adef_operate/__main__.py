@@ -70,6 +70,15 @@ def demo(home: Path) -> int:
                 print(f"     {o['outcome']} -> {o.get('routed_to', '')}"
                       + (f" (escalated to {o['escalated_to']})" if o.get("escalated_to") else ""))
                 print(cause)
+            fin = out.get("reviews", {}).get("finops")
+            for f in (fin or {}).get("findings", []):
+                print(f"     FinOps {f['id']}: {f['title']}; saving {f['monthly_low']:,.2f} to "
+                      f"{f['monthly_high']:,.2f}/month; {f['approval']} OG4 pending")
+            gov = out.get("reviews", {}).get("governance")
+            for g in (gov or {}).get("raised", []):
+                print(f"     Governance {g['id']}: {g['type']}"
+                      f"{' (suspected exposure, escalated)' if g['exposure'] else ''}; {g['approval']} OG5 pending; "
+                      "no agent action")
         print()
     return 0
 

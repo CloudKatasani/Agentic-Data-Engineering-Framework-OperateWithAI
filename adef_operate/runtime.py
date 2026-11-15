@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .agents import CommanderAgent, OnboardingAgent, SentinelAgent
+from .agents import CommanderAgent, FinOpsAgent, GovernanceAgent, OnboardingAgent, SentinelAgent
 from .connectors.paging import OutboxPager
 from .engine.monitor_engine import MonitorEngine
 from .engine.workspace import Workspace
@@ -35,5 +35,13 @@ class OpsRuntime:
         detected = MonitorEngine(ws, self.adapter, simulated=self.simulated).run(at)
         day = at.date().isoformat()
         groups = SentinelAgent(ws, self.adapter).run(day)
-        outcomes = CommanderAgent(ws, self.adapter, self.pager).process_groups(groups, day=day)
-        return {"signals": detected["signals"], "groups": groups, "outcomes": outcomes}
+        commander = CommanderAgent(ws, self.adapter, self.pager)
+        outcomes = commander.process_groups(groups, day=day)
+        reviews = {}
+        # Routed groups wake their owning (recommend-only) agent.
+        routed = {o.get("routed_to") for o in outcomes if o["outcome"] == "routed"}
+        if "adef-ops-finops-performance" in routed:
+            reviews["finops"] = FinOpsAgent(ws, self.adapter, commander).review(day)
+        if "adef-ops-governance-compliance" in routed:
+            reviews["governance"] = GovernanceAgent(ws, self.adapter, commander).review(day, at=at)
+        return {"signals": detected["signals"], "groups": groups, "outcomes": outcomes, "reviews": reviews}
