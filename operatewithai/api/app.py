@@ -6,7 +6,7 @@ addressed to (or the person it was escalated to).
 
 Security, same convention as Build-With-AI:
 * ``ADEF_API_TOKEN``: when set, every ``/api`` call except ``/api/health`` needs it as a bearer token.
-* ``ADEF_IDENTITY_FILE``: optional YAML mapping ``sha256(token)`` to a roster name. When set,
+* ``ADEF_IDENTITY_FILE``: optional YAML mapping ``sha256(token)`` to a seat name. When set,
   each person uses their own token and can only act as themselves. Without it the caller
   names themselves in the ``X-Actor`` header (demo and single-team use).
 """
@@ -187,7 +187,7 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
     @app.get("/api/knowledge")
     def knowledge():
         kb = ops().kb
-        return {"known_errors": kb.known_errors(), "actions": list(kb.actions.values()), "never": kb.never, "connectors": kb.connectors,
+        return {"known_errors": kb.known_errors(), "actions": list(kb.actions.values()), "never": kb.never,
                 "requests": list(kb.requests.values())}
 
     @app.get("/api/reports/{name}")
@@ -204,9 +204,27 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
     @app.get("/api/team")
     def team_view():
         env = svc.env
-        return {"agents": team.AGENTS, "stats": team.stats(ops()), "decisions": team.HUMAN_DECISIONS, "flow": team.FLOW,
-                "roster": [{**p, "tower_name": env.tower_name(p["tower"]) if p.get("tower") else "", "role_text": env.data["roles"].get(p.get("role", ""), ""),
-                            "open": sum(1 for n in ops().notes(p["name"]) if n["kind"] != "fyi")} for p in env.people]}
+        waiting: dict[str, int] = {}
+        for n in ops().notes():
+            if n["kind"] != "fyi":
+                waiting[n["escalated_to"] or n["to"]] = waiting.get(n["escalated_to"] or n["to"], 0) + 1
+        feeds: dict[str, list[str]] = {}
+        for t in ops().kb.signals:
+            for f in t["feeds"]:
+                for a in f["agents"]:
+                    tools = feeds.setdefault(f"{a} Agent", [])
+                    if t["tool"] not in tools:
+                        tools.append(t["tool"])
+        return {"agents": [{**a, "reads": feeds.get(a["name"], [])} for a in team.AGENTS], "stats": team.stats(ops()), "flow": team.FLOW,
+                "people": [{**p, "open": waiting.get(p["name"], 0)} for p in team.people(env)]}
+
+    @app.get("/api/signals")
+    def signals():
+        """What each tool must provide for the agents to work, and what arrived tonight."""
+        w = ops().store.kv("watch_stats") or {}
+        return {"tools": [{**t, "received": (w.get("by_tool") or {}).get(t["id"], 0)} for t in ops().kb.signals],
+                "agents": [a["name"] for a in team.AGENTS], "watch": w,
+                "events": sorted(ops().store.all("event"), key=lambda e: e["first_seen"], reverse=True)[:300]}
 
     @app.get("/api/audit")
     def audit(ref: str = "", limit: int = 300):

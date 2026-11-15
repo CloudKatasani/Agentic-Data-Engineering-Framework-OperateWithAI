@@ -24,7 +24,7 @@ class KB:
         self.actions = {a["id"]: a for a in acts["actions"]}
         self.never = acts["never"]
         self.requests = {r["id"]: r for r in _load("requests.yaml")["catalogue"]}
-        self.connectors = _load("connectors.yaml")["connectors"]
+        self.signals = _load("signals.yaml")["tools"]
 
     def known_errors(self) -> list[dict]:
         learned = self.store.all("ke") if self.store else []

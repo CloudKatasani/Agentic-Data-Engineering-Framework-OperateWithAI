@@ -91,17 +91,23 @@ AGENTS = [
      "asks": []},
 ]
 
-HUMAN_DECISIONS = [
-    ("On-call engineer (per tower)", "Acknowledge the incident; accept the fix plan or take over; do manual steps; confirm resolution; approve new known errors"),
-    ("Incident manager", "Lead P1 incidents; approve every stakeholder message; receive escalations"),
-    ("Service delivery manager", "Approve cost decisions; approve post-incident reviews; accept problems; final escalation point"),
-    ("Change manager", "Approve emergency changes (DDL in production)"),
-    ("Security lead", "Approve credential, account and restricted-access actions"),
-    ("DBA lead", "Approve database space and session actions (done by DBAs, not agents)"),
-    ("BI lead", "Approve restarts of shared BI services"),
-    ("Client data owners", "Approve reloads of their business data and access to it"),
-    ("Client service owner", "Receives approved incident communications"),
-]
+ON_CALL_DECIDES = "Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors"
+EXTRA = {"incident_manager": "Leads P1 incidents; first escalation point", "sdm": "Approves post-incident reviews; accepts problems; final escalation point",
+         "client_service_owner": "Informed only; makes no operational decision"}
+
+
+def people(env) -> list[dict]:
+    """The human seats and what each one decides."""
+    out = []
+    for p in env.people:
+        if p.get("tower"):
+            decides, group = ON_CALL_DECIDES, "On-call engineers"
+        else:
+            decides = env.data["roles"][p["role"]] + (". " + EXTRA[p["role"]] if p["role"] in EXTRA else "")
+            group = "Client" if p["title"] == "Client" else "Managed service leads"
+        out.append({"name": p["name"], "group": group, "covers": env.tower_name(p["tower"]) if p.get("tower") else "", "decides": decides})
+    return out
+
 
 FLOW = [
     ("Detect", "agent", "Watch Desk Agent", "Reads each tool, merges repeats, suppresses expected alerts"),
@@ -140,15 +146,6 @@ def operating_model(env) -> str:
         L += ["", f"May do alone: {a['alone']}", "", "Never:"] + [f"- {n}" for n in a["never"]]
         if a["asks"]:
             L += ["", "Brings in:"] + [f"- {who}: {why}" for who, why in a["asks"]]
-    L += ["", "## The people", "", "| Role | Decides | Tonight |", "|---|---|---|"]
-    names = {p.get("role"): p["name"] for p in env.people if p.get("role")}
-    by_title = {"Incident manager": "incident_manager", "Service delivery manager": "sdm", "Change manager": "change_manager", "Security lead": "security_lead",
-                "DBA lead": "dba_lead", "BI lead": "bi_lead", "Client service owner": "client_service_owner"}
-    for role, what in HUMAN_DECISIONS:
-        who = names.get(by_title.get(role, ""), "")
-        if role.startswith("On-call"):
-            who = "; ".join(f"{p['name']} ({env.tower_name(p['tower'])})" for p in env.people if p.get("on_call"))
-        if role.startswith("Client data"):
-            who = "; ".join(p["name"] for p in env.people if str(p.get("role", "")).startswith("data_owner"))
-        L.append(f"| {role} | {what} | {who} |")
+    L += ["", "## The people", "", "| Seat | Covers | Decides |", "|---|---|---|"]
+    L += [f"| {p['name']} | {p['covers'] or p['group']} | {p['decides']} |" for p in people(env)]
     return "\n".join(L) + "\n"

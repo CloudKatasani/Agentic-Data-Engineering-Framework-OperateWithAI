@@ -1,6 +1,6 @@
 # Client environment model for the managed service. Everything the agents know about the
 # client lives here: systems, the data chain, business services and deadlines, the nightly
-# batch, support towers, the roster, priorities and SLAs. Synthetic demo client; replace
+# batch, support towers, the support seats, priorities and SLAs. Synthetic demo client; replace
 # this file (or add another folder under clients/) for a real engagement. No secrets here.
 
 client:
@@ -24,28 +24,27 @@ towers:
   - {id: integ,      name: "Integrations - MFT and API"}
 
 people:
-  # On-call engineers per tower (night shift shown; a real roster has a row per shift).
-  - {name: "Priya Nair",       title: "L1 Operator",                tower: watch,      on_call: true}
-  - {name: "Elena Petrova",    title: "Informatica Engineer",       tower: etl,        on_call: true}
-  - {name: "Tomasz Zielinski", title: "GoldenGate Engineer",        tower: repl,       on_call: true}
-  - {name: "Hannah Okafor",    title: "Oracle DBA",                 tower: dba_oracle, on_call: true}
-  - {name: "Luis Ortega",      title: "Db2 DBA",                    tower: dba_db2,    on_call: true}
-  - {name: "Mei Tanaka",       title: "Snowflake and dbt Engineer", tower: snowdbt,    on_call: true}
-  - {name: "Sofia Marino",     title: "BI Engineer",                tower: bi,         on_call: true}
-  - {name: "Arjun Patel",      title: "Denodo Engineer",            tower: virt,       on_call: true}
-  - {name: "Grace Liu",        title: "Cloud Engineer",             tower: cloud,      on_call: true}
-  - {name: "Omar Haddad",      title: "Integration Engineer",       tower: integ,      on_call: true}
-  # Decision roles
-  - {name: "Claire Dubois",    title: "Incident Manager",           role: incident_manager}
-  - {name: "Nathan Brooks",    title: "Service Delivery Manager",   role: sdm}
-  - {name: "Rajiv Menon",      title: "DBA Lead",                   role: dba_lead}
-  - {name: "Daniel Cho",       title: "BI Lead",                    role: bi_lead}
-  - {name: "Ingrid Solberg",   title: "Change Manager",             role: change_manager}
-  - {name: "Victor Alvarez",   title: "Security Lead",              role: security_lead}
-  # Client side
-  - {name: "Helen Park",       title: "Finance Data Owner (client)", role: data_owner_finance}
-  - {name: "Samuel Reed",      title: "Claims Data Owner (client)",  role: data_owner_claims}
-  - {name: "Laura Chen",       title: "Client Service Owner",        role: client_service_owner}
+  # One persona per seat. In a real engagement each seat maps to whoever is on shift
+  # (from the roster in ServiceNow or the on-call tool); the agents address the seat.
+  - {name: "L1 Operator",                title: "On call, L1 Watch Desk",              tower: watch,      on_call: true}
+  - {name: "Informatica Engineer",       title: "On call, ETL",                        tower: etl,        on_call: true}
+  - {name: "GoldenGate Engineer",        title: "On call, Replication",                tower: repl,       on_call: true}
+  - {name: "Oracle DBA",                 title: "On call, Oracle",                     tower: dba_oracle, on_call: true}
+  - {name: "Db2 DBA",                    title: "On call, Db2",                        tower: dba_db2,    on_call: true}
+  - {name: "Snowflake and dbt Engineer", title: "On call, Snowflake and dbt",          tower: snowdbt,    on_call: true}
+  - {name: "BI Engineer",                title: "On call, Power BI and Cognos",        tower: bi,         on_call: true}
+  - {name: "Denodo Engineer",            title: "On call, Denodo",                     tower: virt,       on_call: true}
+  - {name: "Cloud Engineer",             title: "On call, AWS and Azure",              tower: cloud,      on_call: true}
+  - {name: "Integration Engineer",       title: "On call, MFT and API",                tower: integ,      on_call: true}
+  - {name: "Incident Manager",           title: "Managed service",                     role: incident_manager}
+  - {name: "Service Delivery Manager",   title: "Managed service",                     role: sdm}
+  - {name: "DBA Lead",                   title: "Managed service",                     role: dba_lead}
+  - {name: "BI Lead",                    title: "Managed service",                     role: bi_lead}
+  - {name: "Change Manager",             title: "Managed service",                     role: change_manager}
+  - {name: "Security Lead",              title: "Managed service",                     role: security_lead}
+  - {name: "Finance Data Owner",         title: "Client",                              role: data_owner_finance}
+  - {name: "Claims Data Owner",          title: "Client",                              role: data_owner_claims}
+  - {name: "Client Service Owner",       title: "Client",                              role: client_service_owner}
 
 roles:
   incident_manager:     "Runs major incidents; approves every stakeholder message"

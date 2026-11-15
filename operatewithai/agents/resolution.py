@@ -56,7 +56,7 @@ def propose(ops) -> None:
         usable = ke and d["status"] in ("confirmed", "likely", "recognised")
         if usable:
             inc["plan"] = {"status": "proposed", "steps": _steps(ops, inc, ke["plan"]), "source": ke["id"], "accepted_by": None}
-            approvals = [f"{s['approver']} ({s['approver_role'].replace('_', ' ')}) for step {s['n']}" for s in inc["plan"]["steps"] if s.get("approver")]
+            approvals = [f"the {s['approver']} for step {s['n']}" for s in inc["plan"]["steps"] if s.get("approver")]
             body = (f"Diagnosis ({d['status']}): {d['cause']}\n\nPlan from runbook {ke['id']}:\n"
                     + "\n".join(f"{s['n']}. {s['title']}" + (f"  [needs {s['approver']}]" if s.get("approver") else "") for s in inc["plan"]["steps"])
                     + ("\n\nI will ask " + "; ".join(approvals) + " after you accept." if approvals else "")
@@ -121,7 +121,7 @@ def advance(ops, inc: dict) -> None:
             if step["class"] == "approval" and not step.get("approved_by"):
                 if step["status"] != "waiting approval":
                     step["status"] = "waiting approval"
-                    ops.note(inc, NAME, f"Step {step['n']} needs approval from {step['approver']} ({step['approver_role'].replace('_', ' ')})")
+                    ops.note(inc, NAME, f"Step {step['n']} needs approval from the {step['approver']}")
                     ops.notify(step["approver"], "approve", inc, f"Approve: {step['title']} ({inc['id']}, {inc['priority']})",
                                f"Why this needs you: {step['why']}.\nHow it is done: {step['how']}.\n\nIncident: {inc['title']}\n"
                                f"Cause: {inc['diagnosis']['cause']}\nPlan accepted by {plan['accepted_by']}.",

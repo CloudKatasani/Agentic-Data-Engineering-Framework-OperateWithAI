@@ -23,7 +23,7 @@ def _pir(ops, inc: dict) -> str:
     steps = plan["steps"]
     by_agent = sum(1 for s in steps if s["kind"] in ("action", "verify", "recovery") and s["status"] == "done")
     by_people = sum(1 for s in steps if s["kind"] == "manual" and s["status"] == "done")
-    approvals = [f"- Step {s['n']} approved by {s['approved_by']} ({s['approver_role'].replace('_', ' ')})" for s in steps if s.get("approved_by")]
+    approvals = [f"- Step {s['n']} approved by the {s['approved_by']}" for s in steps if s.get("approved_by")]
     svc = [f"- {s['name']}: {s['status']} (due {s['deadline'][11:16]}, estimate or actual {s['eta'][11:16]})"
            for sid, s in (ops.projection.get("services") or {}).items() if sid in inc["services"]]
     late = [t for t in inc["timeline"] if "escalated" in t["text"]]

@@ -191,14 +191,24 @@ Never:
 
 ## The people
 
-| Role | Decides | Tonight |
+| Seat | Covers | Decides |
 |---|---|---|
-| On-call engineer (per tower) | Acknowledge the incident; accept the fix plan or take over; do manual steps; confirm resolution; approve new known errors | Priya Nair (L1 Watch Desk); Elena Petrova (ETL - Informatica); Tomasz Zielinski (Replication - GoldenGate); Hannah Okafor (DBA - Oracle); Luis Ortega (DBA - Db2); Mei Tanaka (Snowflake and dbt); Sofia Marino (BI - Power BI and Cognos); Arjun Patel (Virtualization - Denodo); Grace Liu (Cloud and Infra - AWS and Azure); Omar Haddad (Integrations - MFT and API) |
-| Incident manager | Lead P1 incidents; approve every stakeholder message; receive escalations | Claire Dubois |
-| Service delivery manager | Approve cost decisions; approve post-incident reviews; accept problems; final escalation point | Nathan Brooks |
-| Change manager | Approve emergency changes (DDL in production) | Ingrid Solberg |
-| Security lead | Approve credential, account and restricted-access actions | Victor Alvarez |
-| DBA lead | Approve database space and session actions (done by DBAs, not agents) | Rajiv Menon |
-| BI lead | Approve restarts of shared BI services | Daniel Cho |
-| Client data owners | Approve reloads of their business data and access to it | Helen Park; Samuel Reed |
-| Client service owner | Receives approved incident communications | Laura Chen |
+| L1 Operator | L1 Watch Desk | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Informatica Engineer | ETL - Informatica | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| GoldenGate Engineer | Replication - GoldenGate | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Oracle DBA | DBA - Oracle | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Db2 DBA | DBA - Db2 | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Snowflake and dbt Engineer | Snowflake and dbt | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| BI Engineer | BI - Power BI and Cognos | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Denodo Engineer | Virtualization - Denodo | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Cloud Engineer | Cloud and Infra - AWS and Azure | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Integration Engineer | Integrations - MFT and API | Acknowledges incidents; accepts the fix plan or takes over; does manual steps; confirms resolution; approves new known errors |
+| Incident Manager | Managed service leads | Runs major incidents; approves every stakeholder message. Leads P1 incidents; first escalation point |
+| Service Delivery Manager | Managed service leads | Owns the service and its SLAs; approves cost decisions and service reports. Approves post-incident reviews; accepts problems; final escalation point |
+| DBA Lead | Managed service leads | Approves database changes: space, sessions, DDL in production |
+| BI Lead | Managed service leads | Approves restarts of shared BI services |
+| Change Manager | Managed service leads | Approves emergency changes |
+| Security Lead | Managed service leads | Approves account, credential and access actions |
+| Finance Data Owner | Client | Decides on finance data: reloads, publishing with known issues, access |
+| Claims Data Owner | Client | Decides on claims data: reloads, publishing with known issues, access |
+| Client Service Owner | Client | Receives major incident communications for the client. Informed only; makes no operational decision |

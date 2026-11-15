@@ -79,7 +79,7 @@ def run(ops) -> None:
             else:
                 t["stage"] = "awaiting approval"
                 t["approvals"] = [{"role": r, "person": ops.env.holder(r), "status": "pending"} for r in approvers]
-                ops.note(t, NAME, "Validated. Needs approval from " + ", ".join(f"{a['person']} ({a['role'].replace('_', ' ')})" for a in t["approvals"])
+                ops.note(t, NAME, "Validated. Needs approval from " + " and ".join(f"the {a['person']}" for a in t["approvals"])
                          + (f". {rule['note']}" if rule.get("note") else ""))
                 for i, a in enumerate(t["approvals"]):
                     ops.notify(a["person"], "approve_request", t, f"Approve request {t['id']}: {t['title']}",
@@ -93,7 +93,7 @@ def run(ops) -> None:
 def decide(ops, n: dict, t: dict, actor: str, action: str, text: str) -> None:
     a = t["approvals"][n["step"]]
     a.update(status="approved" if action == "approve" else "declined", by=actor, at=ops.now.isoformat())
-    ops.note(t, actor, f"{'Approved' if action == 'approve' else 'Declined'} as {a['role'].replace('_', ' ')}" + (f": {text}" if text else ""), human=True)
+    ops.note(t, actor, f"{'Approved' if action == 'approve' else 'Declined'} the request" + (f": {text}" if text else ""), human=True)
     if action != "approve":
         ops.close_notes(t["id"], kinds=("approve_request",), reason="declined by another approver")
         _close(ops, t, "Rejected", f"Declined by {actor}: {text or 'no reason given'}")

@@ -89,7 +89,7 @@ def test_one_cause_seen_by_two_tools_is_one_incident():
     sources = {svc.store.need("event", e)["source"] for e in inc["events"]}
     assert {"oracle", "goldengate", "informatica"} <= sources
     assert inc["ke"] == "KE0003" and inc["diagnosis"]["status"] == "confirmed"
-    assert inc["assignee"] == "Hannah Okafor" and inc["priority"] == "P2"
+    assert inc["assignee"] == "Oracle DBA" and inc["priority"] == "P2"
     assert set(inc["services"]) == {"BS-FIN-CLOSE", "BS-REG-LIQ"}
 
 
@@ -122,57 +122,57 @@ def test_only_the_addressed_person_can_decide():
     svc = night(["S01"], "01:00")
     plan = ask(svc, "plan")
     with pytest.raises(Refused):
-        svc.act(plan["id"], "Elena Petrova", "accept")
+        svc.act(plan["id"], "Informatica Engineer", "accept")
     with pytest.raises(Refused):
         svc.act(plan["id"], "Mallory Nobody", "accept")
-    svc.act(plan["id"], "Tomasz Zielinski", "accept")
+    svc.act(plan["id"], "GoldenGate Engineer", "accept")
     with pytest.raises(Refused):                      # already handled
-        svc.act(plan["id"], "Tomasz Zielinski", "accept")
+        svc.act(plan["id"], "GoldenGate Engineer", "accept")
 
 
 def test_approval_class_step_waits_for_the_named_approver():
     svc = night(["S01"], "01:00")
-    svc.act(ask(svc, "plan")["id"], "Tomasz Zielinski", "accept")
+    svc.act(ask(svc, "plan")["id"], "GoldenGate Engineer", "accept")
     (inc,) = incidents(svc)
     assert inc["ack_at"] and inc["sla"]["respond_met"]
     assert svc.world.actions == []                    # accepted, but the DDL still needs the change manager
     appr = ask(svc, "approve")
-    assert appr["to"] == "Ingrid Solberg"
+    assert appr["to"] == "Change Manager"
     with pytest.raises(Refused):
-        svc.act(appr["id"], "Tomasz Zielinski", "approve")
-    svc.act(appr["id"], "Ingrid Solberg", "approve")
+        svc.act(appr["id"], "GoldenGate Engineer", "approve")
+    svc.act(appr["id"], "Change Manager", "approve")
     assert [a["action"] for a in svc.world.actions] == ["snowflake.add_column_from_source", "goldengate.start_process"]
     assert svc.world.ogg["REP_SNF"]["status"] == "RUNNING"
 
 
 def test_declined_approval_stops_the_plan_and_hands_back():
     svc = night(["S04"], "02:15")
-    svc.act(ask(svc, "plan")["id"], "Mei Tanaka", "accept")
-    svc.act(ask(svc, "approve")["id"], "Nathan Brooks", "reject", "Not this month")
+    svc.act(ask(svc, "plan")["id"], "Snowflake and dbt Engineer", "accept")
+    svc.act(ask(svc, "approve")["id"], "Service Delivery Manager", "reject", "Not this month")
     (inc,) = incidents(svc)
     assert inc["plan"]["status"] == "blocked" and svc.world.actions == []
-    assert ask(svc, "blocked")["to"] == "Mei Tanaka"
+    assert ask(svc, "blocked")["to"] == "Snowflake and dbt Engineer"
 
 
 def test_unanswered_ask_escalates_to_incident_manager_then_sdm():
     svc = night(["S01"], "01:45")
     plan = ask(svc, "plan")
-    assert plan["escalated_to"] in ("Claire Dubois", "Nathan Brooks")
+    assert plan["escalated_to"] in ("Incident Manager", "Service Delivery Manager")
     svc.run_until("02:30")
-    assert ask(svc, "plan")["escalated_to"] == "Nathan Brooks"
-    svc.act(plan["id"], "Nathan Brooks", "accept")    # the escalation recipient may act
+    assert ask(svc, "plan")["escalated_to"] == "Service Delivery Manager"
+    svc.act(plan["id"], "Service Delivery Manager", "accept")    # the escalation recipient may act
 
 
 def test_stakeholder_message_needs_the_incident_manager():
     svc = night(["S03"], "01:15")
     c = ask(svc, "comms")
-    assert c["to"] == "Claire Dubois"
+    assert c["to"] == "Incident Manager"
     (inc,) = incidents(svc)
     assert inc["comms"][0]["status"] == "draft"
-    svc.act(c["id"], "Claire Dubois", "send", "Edited by Claire.")
+    svc.act(c["id"], "Incident Manager", "send", "Edited by the incident manager.")
     (inc,) = incidents(svc)
-    assert inc["comms"][0]["status"] == "sent" and inc["comms"][0]["text"] == "Edited by Claire."
-    assert any(n["to"] == "Laura Chen" and n["kind"] == "fyi" for n in svc.ops.notes())
+    assert inc["comms"][0]["status"] == "sent" and inc["comms"][0]["text"] == "Edited by the incident manager."
+    assert any(n["to"] == "Client Service Owner" and n["kind"] == "fyi" for n in svc.ops.notes())
 
 
 # ------------------------------------------------------------------ whole nights
@@ -196,7 +196,7 @@ def test_breach_is_predicted_and_priority_raised_when_nobody_acts():
     (inc,) = incidents(svc)
     assert inc["priority"] == "P1" and inc["major"]
     assert svc.ops.projection["services"]["BS-FIN-CLOSE"]["status"] == "breach predicted"
-    assert any(n["kind"] == "major" and n["to"] == "Claire Dubois" for n in svc.ops.notes())
+    assert any(n["kind"] == "major" and n["to"] == "Incident Manager" for n in svc.ops.notes())
 
 
 def test_slow_host_is_caught_before_anything_fails():
@@ -225,17 +225,17 @@ def test_recurring_known_error_opens_a_problem_for_the_sdm():
 def test_preventive_rotation_stops_the_incident_from_happening():
     svc = night(["S03"], "00:40")
     req = ask(svc, "approve_request")
-    assert req["to"] == "Victor Alvarez"
-    svc.act(req["id"], "Victor Alvarez", "approve")
+    assert req["to"] == "Security Lead"
+    svc.act(req["id"], "Security Lead", "approve")
     svc.run_until("02:00")
     assert incidents(svc) == [] and svc.world.prevented == ["oracle.account_expired"]
 
 
 def test_restricted_access_request_needs_owner_and_security():
     svc = night([], "01:00")
-    t = svc.raise_request("SR-SNOW-ROLE", {"user": "jdoe", "role": "CLAIMS_PII_RO", "reason": "Fraud review"}, "Jane Doe")
+    t = svc.raise_request("SR-SNOW-ROLE", {"user": "jdoe", "role": "CLAIMS_PII_RO", "reason": "Fraud review"}, "Business user")
     asks = [n for n in svc.ops.notes() if n["ticket"] == t["id"]]
-    assert {n["to"] for n in asks} == {"Samuel Reed", "Victor Alvarez"}
+    assert {n["to"] for n in asks} == {"Claims Data Owner", "Security Lead"}
     svc.act(asks[0]["id"], asks[0]["to"], "approve")
     assert svc.world.grants == []
     svc.act(asks[1]["id"], asks[1]["to"], "approve")
@@ -244,7 +244,7 @@ def test_restricted_access_request_needs_owner_and_security():
 
 def test_report_rerun_waits_for_data():
     svc = night([], "01:00")
-    t = svc.raise_request("SR-REPORT-RERUN", {"node": "pbi.policy_ops", "reason": "Missed it"}, "Jane Doe")
+    t = svc.raise_request("SR-REPORT-RERUN", {"node": "pbi.policy_ops", "reason": "Missed it"}, "Business user")
     assert svc.store.need("ticket", t["id"])["stage"] == "waiting for data"
     svc.run_until("06:00")
     assert svc.store.need("ticket", t["id"])["state"] == "Resolved"
@@ -270,16 +270,16 @@ def test_api_and_console(monkeypatch):
     svc = night(["S03", "S05"], "01:20")
     c = TestClient(create_app(svc))
     assert c.get("/").status_code == 200 and c.get("/static/app.js").status_code == 200
-    for path in ("/api/meta", "/api/overview", "/api/tickets", "/api/batch", "/api/events", "/api/knowledge", "/api/team", "/api/audit",
-                 "/api/reports/health", "/api/reports/handover", "/api/reports/review", "/api/inbox?person=Hannah%20Okafor"):
+    for path in ("/api/meta", "/api/overview", "/api/tickets", "/api/batch", "/api/signals", "/api/knowledge", "/api/team", "/api/audit",
+                 "/api/reports/health", "/api/reports/handover", "/api/reports/review", "/api/inbox?person=Oracle%20DBA"):
         assert c.get(path).status_code == 200, path
     inc = next(t for t in c.get("/api/tickets?type=incident").json() if t["ke"] == "KE0003")
     detail = c.get(f"/api/tickets/{inc['id']}").json()
     assert detail["chains"] and detail["ticket"]["servicenow"]["table"] == "incident"
-    plan = next(n for n in c.get("/api/inbox?person=Hannah%20Okafor").json()["items"] if n["kind"] == "plan")
+    plan = next(n for n in c.get("/api/inbox?person=Oracle%20DBA").json()["items"] if n["kind"] == "plan")
     assert c.post(f"/api/inbox/{plan['id']}", json={"action": "accept"}).status_code == 403                      # no identity
-    assert c.post(f"/api/inbox/{plan['id']}", json={"action": "accept"}, headers={"X-Actor": "Sofia Marino"}).status_code == 403
-    assert c.post(f"/api/inbox/{plan['id']}", json={"action": "accept"}, headers={"X-Actor": "Hannah Okafor"}).status_code == 200
+    assert c.post(f"/api/inbox/{plan['id']}", json={"action": "accept"}, headers={"X-Actor": "BI Engineer"}).status_code == 403
+    assert c.post(f"/api/inbox/{plan['id']}", json={"action": "accept"}, headers={"X-Actor": "Oracle DBA"}).status_code == 200
     assert c.get("/api/tickets/NOPE").status_code == 404
     assert c.post("/api/sim/advance", json={"minutes": 10}).json()["now"].endswith("01:30:00")
 

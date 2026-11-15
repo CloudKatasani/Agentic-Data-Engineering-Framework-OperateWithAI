@@ -81,7 +81,7 @@ class Service:
         with self.lock:
             ops = self.ops
             if not self.env.is_person(actor):
-                raise Refused(f"{actor} is not on the roster.")
+                raise Refused(f"{actor} is not one of the seats in the client model.")
             n = self.store.need("note", note_id)
             ops.may_act(n, actor)
             spec = next((a for a in n["actions"] if a["id"] == action), None)
@@ -114,7 +114,7 @@ class Service:
     def comment(self, ticket_id: str, actor: str, text: str) -> dict:
         with self.lock:
             if not self.env.is_person(actor):
-                raise Refused(f"{actor} is not on the roster.")
+                raise Refused(f"{actor} is not one of the seats in the client model.")
             t = self.store.need("ticket", ticket_id)
             self.ops.note(t, actor, text, human=True)
             return t

@@ -1,0 +1,110 @@
+# What the agents need from each tool in the client estate: logs, telemetry, audit data and
+# metadata. This is the onboarding checklist for a client. Everything is read-only and is
+# status, log or metadata: no business data rows. "agents" says who uses the feed and
+# "enables" what that agent can then do.
+# type: Log | Telemetry | Audit | Metadata
+
+tools:
+  - id: oracle
+    tool: Oracle Database
+    access: "Read-only monitoring account (SELECT_CATALOG_ROLE) over JDBC; alert log through the Dynatrace or OEM log agent"
+    feeds:
+      - {name: "Alert log (alert_<SID>.log)", type: Log, gives: "ORA- errors, instance events, archiver and space problems", agents: [Watch Desk, Diagnosis], enables: "Detect database errors and match them to known errors (ORA-28001, ORA-01555, ORA-01653)"}
+      - {name: "DBA_USERS and password profiles", type: Metadata, gives: "Account status and password expiry dates of service accounts", agents: [Watch Desk, Diagnosis, Service Request], enables: "Confirm an expired account as the cause; raise a rotation request days before expiry"}
+      - {name: "V$SESSION, V$LOCK, V$UNDOSTAT", type: Telemetry, gives: "Blocking sessions, long transactions, undo pressure", agents: [Diagnosis], enables: "Show who is blocking a load before a DBA is asked to act"}
+      - {name: "DBA_DATA_FILES, DBA_FREE_SPACE", type: Telemetry, gives: "Tablespace usage and growth", agents: [Watch Desk], enables: "Warn before a tablespace fills during the batch"}
+      - {name: "Unified audit trail (DDL only)", type: Audit, gives: "Who changed which table definition and when", agents: [Diagnosis], enables: "Tie a replication failure to the schema change that caused it"}
+  - id: goldengate
+    tool: Oracle GoldenGate
+    access: "Admin Service REST API (Microservices) or GGSCI over SSH with a monitoring user"
+    feeds:
+      - {name: "ggserr.log", type: Log, gives: "OGG- errors and abend messages for every process", agents: [Watch Desk, Triage], enables: "Detect an abend within one cycle and recognise its cause (OGG-01296, OGG-00664, OGG-00446)"}
+      - {name: "INFO ALL / process status", type: Telemetry, gives: "State and checkpoint lag of each extract, pump and replicat", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Track replication lag against the limit; verify recovery after a restart"}
+      - {name: "Process report files (.rpt)", type: Log, gives: "The failing statement, table and mapping detail", agents: [Diagnosis], enables: "Name the table and column behind a mapping error"}
+      - {name: "Discard files", type: Audit, gives: "Rejected operations (keys and error only)", agents: [Diagnosis], enables: "Count what was rejected without reading business rows"}
+  - id: informatica
+    tool: Informatica PowerCenter
+    access: "Read-only repository user (REP_ views) and pmcmd for run status"
+    feeds:
+      - {name: "REP_WFLOW_RUN, REP_TASK_INST_RUN", type: Telemetry, gives: "Workflow and session runs: start, end, status, error code", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect failures and late runs; project finish times; confirm a restart completed"}
+      - {name: "Session logs", type: Log, gives: "The database error behind a failed session (RR_4035, WRT_8229, CMN_1022)", agents: [Diagnosis], enables: "Find the real cause inside the wrapper error, for example SQL0911N or ORA-28001"}
+      - {name: "REP_SESS_LOG row counts", type: Telemetry, gives: "Rows read, written and rejected per session", agents: [Diagnosis, Batch and SLA], enables: "Spot a doubled or empty load; estimate progress of a running session"}
+  - id: db2
+    tool: IBM Db2
+    access: "Read-only monitoring account (SQLADM or DATAACCESS not needed; EXECUTE on MON_GET functions)"
+    feeds:
+      - {name: "db2diag.log", type: Log, gives: "Engine errors, deadlocks and lock timeouts, storage events", agents: [Watch Desk, Diagnosis], enables: "Detect SQL0911N and SQL0289N conditions at the source"}
+      - {name: "MON_GET_LOCKS, lock event monitor", type: Telemetry, gives: "Who held and who waited for locks, and when", agents: [Diagnosis], enables: "Show that a housekeeping job, not a business transaction, blocked the load"}
+      - {name: "MON_GET_TABLESPACE", type: Telemetry, gives: "Tablespace utilisation", agents: [Watch Desk], enables: "Warn before a tablespace fills"}
+  - id: snowflake
+    tool: Snowflake
+    access: "Monitoring role with IMPORTED PRIVILEGES on the SNOWFLAKE database (ACCOUNT_USAGE) and MONITOR on warehouses"
+    feeds:
+      - {name: "Resource monitors and warehouse state", type: Telemetry, gives: "Credits used against quota; suspended warehouses", agents: [Watch Desk, Diagnosis, Resolution], enables: "Catch a suspended warehouse before the dbt build needs it; verify it resumed"}
+      - {name: "QUERY_HISTORY", type: Audit, gives: "Query text hash, user, warehouse, duration, error code, credits", agents: [Diagnosis, Problem and Knowledge], enables: "Name the top credit consumer; find timeouts (000630) and their pattern"}
+      - {name: "LOAD_HISTORY, COPY_HISTORY", type: Telemetry, gives: "Files loaded, row counts, load errors", agents: [Watch Desk, Batch and SLA], enables: "Know when each RAW table was last loaded"}
+      - {name: "INFORMATION_SCHEMA.COLUMNS", type: Metadata, gives: "Current table definitions", agents: [Diagnosis], enables: "Compare a replicated table with its Oracle source to find a missing column"}
+      - {name: "LOGIN_HISTORY, GRANTS_TO_USERS", type: Audit, gives: "Failed logins; who holds which role", agents: [Service Request], enables: "Validate access requests and record what was granted"}
+  - id: dbt
+    tool: dbt
+    access: "dbt Cloud service token (job and run read, job trigger) or the artifacts folder of dbt Core"
+    feeds:
+      - {name: "run_results.json", type: Log, gives: "Status, timing and message for every model and test", agents: [Watch Desk, Triage, Resolution], enables: "See which models failed or were skipped and why; retry only those"}
+      - {name: "sources.json (source freshness)", type: Telemetry, gives: "How old each source table is against its threshold", agents: [Triage, Batch and SLA], enables: "Attach a skipped model to the late upstream load instead of opening a new incident"}
+      - {name: "manifest.json", type: Metadata, gives: "Model lineage and exposures", agents: [Triage, Batch and SLA], enables: "Work out which reports depend on a failed model"}
+      - {name: "Job run webhooks", type: Telemetry, gives: "Job started, finished, errored", agents: [Watch Desk], enables: "React when the run ends, without polling"}
+  - id: denodo
+    tool: Denodo
+    access: "Monitoring user on Virtual DataPort and Scheduler (REST)"
+    feeds:
+      - {name: "Scheduler job results", type: Telemetry, gives: "Cache load jobs: result, duration, error", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect a failed cache load; run it again after the cause is fixed"}
+      - {name: "vdp.log and query monitor", type: Log, gives: "Query errors, slow queries, data source failures", agents: [Diagnosis], enables: "Separate a Denodo problem from a source problem"}
+      - {name: "Data source connection pool metrics (JMX)", type: Telemetry, gives: "Active and idle connections per data source", agents: [Diagnosis], enables: "Show an exhausted pool as the cause of a cache failure"}
+  - id: powerbi
+    tool: Power BI
+    access: "Service principal with read access to the workspaces and the Admin API (tenant setting)"
+    feeds:
+      - {name: "Dataset refresh history", type: Telemetry, gives: "Refresh status, duration and error code per dataset", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect a failed morning refresh; start it again once the source is back"}
+      - {name: "Gateway and data source status", type: Telemetry, gives: "Gateway cluster members online or offline", agents: [Watch Desk, Diagnosis], enables: "Confirm an unreachable gateway as the cause"}
+      - {name: "Activity log", type: Audit, gives: "Who refreshed, published or viewed", agents: [Service Reporting], enables: "Report whether the dashboard was ready when users opened it"}
+  - id: cognos
+    tool: IBM Cognos Analytics
+    access: "Read-only user on the audit database; a Cognos account with the monitoring capability"
+    feeds:
+      - {name: "Audit database (COGIPF_RUNREPORT, COGIPF_RUNJOB)", type: Audit, gives: "Every report and burst run: status, runtime, error", agents: [Watch Desk, Batch and SLA], enables: "Detect failed schedules and bursts; know when a report was delivered"}
+      - {name: "cogserver.log / cognosserver.log", type: Log, gives: "Dispatcher and query engine errors (DPR-ERR, QE-DEF, XQE)", agents: [Diagnosis], enables: "Recognise a saturated report service or a data source failure"}
+      - {name: "Dispatcher and service metrics", type: Telemetry, gives: "Report processes busy, queue length", agents: [Diagnosis, Resolution], enables: "Confirm saturation; verify the service is healthy after a restart"}
+  - id: dynatrace
+    tool: Dynatrace
+    access: "API token with problems.read, metrics.read, entities.read; problem notification webhook"
+    feeds:
+      - {name: "Problem notifications (opened, resolved)", type: Telemetry, gives: "Host down, CPU and memory saturation, service degradation", agents: [Watch Desk, Triage], enables: "See an infrastructure cause before the jobs that depend on it fail"}
+      - {name: "Host and process metrics", type: Telemetry, gives: "CPU, memory, disk and the top processes per host", agents: [Diagnosis, Resolution], enables: "Name the process that is starving a server; verify the host recovered"}
+      - {name: "Log monitoring", type: Log, gives: "Central collection point for the tool logs above", agents: [Watch Desk], enables: "One route for logs when direct access to a server is not allowed"}
+  - id: aws
+    tool: AWS
+    access: "Read-only IAM role (CloudWatch, CloudTrail lookup); SSM Run Command limited to the action allow list"
+    feeds:
+      - {name: "CloudWatch metrics and alarms", type: Telemetry, gives: "EC2 and RDS health, disk, status checks", agents: [Watch Desk], enables: "Detect host-level problems on the database and ETL servers"}
+      - {name: "CloudTrail", type: Audit, gives: "Who stopped, started or changed a resource", agents: [Diagnosis, Problem and Knowledge], enables: "Explain why a server changed state; evidence for the review"}
+      - {name: "AWS Health events", type: Telemetry, gives: "Provider-side incidents and scheduled maintenance", agents: [Watch Desk], enables: "Tell a provider outage from a client-side fault"}
+  - id: azure
+    tool: Microsoft Azure
+    access: "Reader role plus Virtual Machine Contributor on restartable hosts only"
+    feeds:
+      - {name: "Azure Monitor metrics and resource health", type: Telemetry, gives: "VM power state and availability", agents: [Watch Desk, Diagnosis, Resolution], enables: "Confirm a stopped gateway VM; verify it is running again"}
+      - {name: "Activity log", type: Audit, gives: "Start, stop, deallocate and update operations with caller", agents: [Diagnosis], enables: "Show that a failed guest update stopped the VM"}
+      - {name: "Entra ID sign-in and app credential expiry", type: Audit, gives: "Service principal failures (AADSTS codes), secret expiry dates", agents: [Watch Desk, Service Request], enables: "Warn before a client secret expires"}
+  - id: mft
+    tool: Managed file transfer and integrations
+    access: "Read-only access to the gateway's audit API or transfer log"
+    feeds:
+      - {name: "Transfer audit log", type: Audit, gives: "File name, partner, arrival time, size, checksum", agents: [Watch Desk, Diagnosis, Batch and SLA], enables: "Detect a late, missing, empty or duplicate file before it is loaded"}
+      - {name: "Expected-file calendar", type: Metadata, gives: "Which file is due from whom and by when", agents: [Watch Desk], enables: "Know that a file is late, not just absent"}
+  - id: servicenow
+    tool: ServiceNow
+    access: "Integration user: read on change and CMDB tables, write on incident, request and problem"
+    feeds:
+      - {name: "Change calendar (change_request)", type: Metadata, gives: "Approved changes with their windows and CIs", agents: [Watch Desk, Diagnosis], enables: "Suppress expected alerts during a change; link an incident to a recent change"}
+      - {name: "CMDB and assignment groups", type: Metadata, gives: "Systems, owners and support groups", agents: [Triage], enables: "Route each ticket to the right tower"}
+      - {name: "Incident, request and problem history", type: Audit, gives: "Past tickets and their resolutions", agents: [Problem and Knowledge, Service Reporting], enables: "Find recurring errors; produce SLA reports from the system of record"}

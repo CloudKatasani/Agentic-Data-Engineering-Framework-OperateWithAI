@@ -1,5 +1,5 @@
 """The client environment model: systems, the data chain, business services, the batch
-plan, towers, the roster, priorities and SLAs. Agents read the client only through this."""
+plan, towers, the support seats, priorities and SLAs. Agents read the client only through this."""
 
 from __future__ import annotations
 

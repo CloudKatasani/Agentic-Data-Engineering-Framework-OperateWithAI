@@ -1,5 +1,3 @@
-"""OperateWithAI: AI agents working alongside a managed-services team to monitor and
-operate an enterprise data estate (Oracle, Db2, GoldenGate, Informatica, Snowflake, dbt,
-Denodo, Power BI, Cognos, Dynatrace, AWS and Azure)."""
+"""OperateWithAI: AI agents and people running a data platform managed service."""
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

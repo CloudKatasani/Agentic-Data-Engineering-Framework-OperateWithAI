@@ -97,7 +97,7 @@ function askCard(n, opts = {}) {
     : mine ? n.actions.map((a) => `<button class="btn small ${a.style === "primary" ? "primary" : a.style === "bad" ? "bad" : ""}" data-act="${esc(n.id)}|${esc(a.id)}">${esc(a.label)}</button>`).join(" ")
       : `<span class="muted small">Waiting for ${esc(n.escalated_to || n.to)}</span>`;
   return `<div class="card ask ${n.kind === "fyi" ? "fyi" : ""} ${late ? "late" : ""}">
-    <div class="meta">${n.priority && n.ticket ? pri(n.priority) : ""}<span class="who ai">Agent</span>${esc(n.agent)} asks ${esc(n.to)}${n.role ? ` (${esc(n.role)})` : ""}
+    <div class="meta">${n.priority && n.ticket ? pri(n.priority) : ""}<span class="who ai">Agent</span>${esc(n.agent)} asks the ${esc(n.to)}
       <span>· sent ${hm(n.created)}</span>${n.kind !== "fyi" && n.status === "open" ? `<span>· respond by <b>${hm(n.due)}</b></span>` : ""}
       ${n.escalated_to ? badge("escalated to " + n.escalated_to, "b-bad") : ""}
       ${n.ticket && !opts.noLink ? `<a href="#/ticket/${esc(n.ticket)}">${esc(n.ticket)}</a>` : ""}</div>
@@ -125,7 +125,7 @@ document.addEventListener("click", async (e) => {
 
 // ------------------------------------------------------------------ routing
 const routes = {};
-const AUTO = ["home", "inbox", "incidents", "ticket", "batch", "alerts", "requests"];
+const AUTO = ["home", "inbox", "incidents", "ticket", "batch", "requests"];
 function current() { const [, name = "home", ...args] = location.hash.split("/"); return [routes[name] ? name : "home", args.map(decodeURIComponent)]; }
 async function render(quiet) {
   const [name, args] = current();
@@ -176,7 +176,7 @@ routes.home = async () => {
       <div class="card kpi"><div class="v">${open.length}</div><div class="l">Open incidents${open.some((i) => i.priority === "P1") ? " · P1 active" : ""}</div></div>
       <div class="card kpi"><div class="v">${o.asks}</div><div class="l">Decisions waiting on people</div></div>
       <div class="card kpi"><div class="v">${risk}</div><div class="l">Business services at risk</div></div>
-      <div class="card kpi"><div class="funnel"><span><b>${w.raw || 0}</b> tool reports</span>→<span><b>${w.events || 0}</b> alerts</span>→<span><b>${o.incidents.length}</b> incidents</span></div><div class="l">Noise removed by the Watch Desk and Triage agents</div></div>
+      <div class="card kpi"><div class="funnel"><span><b>${w.raw || 0}</b> tool reports</span>→<span><b>${w.events || 0}</b> alerts</span>→<span><b>${o.incidents.length}</b> incidents</span></div><div class="l"><a href="#/data">What the agents read tonight</a></div></div>
     </div>
     <h2>Business services due this morning</h2>
     <div class="grid g4">${o.services.map((s) => `<div class="card svc s-${slug(s.status)}">
@@ -199,7 +199,7 @@ routes.home = async () => {
           ${o.waiting.length ? o.waiting.map(([p, c]) => `<div class="spread" style="padding:4px 0"><a href="#/inbox" data-as="${esc(p)}">${esc(p)}</a>${badge(c, "b-warn")}</div>`).join("") : '<div class="muted small">Nothing is waiting on a person.</div>'}
           ${o.prevented.length ? `<div class="notice" style="margin-top:10px">Prevented tonight: the service account expiry never happened because the rotation request was approved in time.</div>` : ""}</div>
         ${o.advisories.length ? `<div class="card"><h3 style="margin-top:0">Advisories</h3>${o.advisories.map((e) => `<div class="small" style="padding:4px 0">${dot("amber")}${esc(e.message)}<div class="muted">${esc(e.handling)}</div></div>`).join("")}</div>` : ""}
-        <div class="card"><h3 style="margin-top:0">Latest activity</h3><div class="feed">${o.activity.map((a) => `<div class="e"><span class="ts">${hm(a.at)}</span> ${who(a.actor, a.actor_type === "person")} ${a.ref ? `<a href="${/^(INC|RITM|PRB)/.test(a.ref) ? "#/ticket/" + esc(a.ref) : "#/audit"}">${esc(a.ref)}</a>` : ""}<br>${esc(a.action)}</div>`).join("")}</div></div>
+        <div class="card"><h3 style="margin-top:0">Latest activity</h3><div class="feed">${o.activity.slice(0, 8).map((a) => `<div class="e"><span class="ts">${hm(a.at)}</span> ${who(a.actor, a.actor_type === "person")} ${a.ref ? `<a href="${/^(INC|RITM|PRB)/.test(a.ref) ? "#/ticket/" + esc(a.ref) : "#/audit"}">${esc(a.ref)}</a>` : ""}<br>${esc(a.action)}</div>`).join("")}</div></div>
       </div>
     </div>`;
 };
@@ -213,7 +213,7 @@ routes.inbox = async () => {
   const fyi = r.items.filter((n) => n.kind === "fyi" && n.status === "open");
   const past = r.items.filter((n) => n.status !== "open");
   const p = META.people.find((x) => x.name === me()) || {};
-  main().innerHTML = `<div class="spread"><div><h1>My inbox</h1><div class="sub">${esc(me())} · ${esc(p.title || "")}${p.tower_name ? " · " + esc(p.tower_name) : ""}${p.role_text ? " · " + esc(p.role_text) : ""}</div></div>
+  main().innerHTML = `<div class="spread"><div><h1>My inbox</h1><div class="sub">You are the ${esc(me())}${p.tower_name ? " · on call for " + esc(p.tower_name) : ""}${p.role_text ? " · " + esc(p.role_text) : ""}</div></div>
       <label class="chk small"><input type="checkbox" id="inboxAll" ${all ? "checked" : ""}> Show handled</label></div>
     <h2>Needs your decision (${asks.length})</h2>${asks.map((n) => askCard(n)).join("") || '<div class="empty">Nothing needs you right now. The agents will ask when it does.</div>'}
     ${fyi.length ? `<h2>For your information (${fyi.length})</h2>${fyi.map((n) => askCard(n)).join("")}` : ""}
@@ -267,9 +267,9 @@ routes.ticket = async (id) => {
     ${diag}${steps}${comms}
     ${t.pir ? `<div class="card"><h3 style="margin-top:0">Post-incident review ${badge(t.pir.status, t.pir.status === "approved" ? "b-ok" : "b-warn")}</h3>${md(t.pir.text)}</div>` : ""}
     ${(r.events || []).length ? `<div class="card"><h3 style="margin-top:0">Alerts handled in this ticket (${r.events.length})</h3>${table(["First seen", "Tool", "Alert", "Codes", "Handling", "State"], r.events.map((e) => `<tr><td class="mono">${hm(e.first_seen)}</td><td>${esc(e.source)}</td><td>${esc(e.message)}${e.count > 1 ? ` <span class="muted">×${e.count}</span>` : ""}</td><td class="mono small">${esc(e.codes.join(" "))}</td><td class="small">${esc(e.handling)}</td><td>${badge(e.status, e.status === "cleared" ? "b-ok" : "b-bad")}</td></tr>`))}</div>` : ""}
-    <div class="grid g2"><div class="card"><h3 style="margin-top:0">Timeline</h3><div class="feed">${t.timeline.map((x) => `<div class="e"><span class="ts">${hm(x.at)}</span> ${who(x.actor, x.human)}<br>${esc(x.text)}</div>`).join("")}</div>
-        <div class="row" style="margin-top:10px"><input id="cmt" placeholder="Add a work note as ${esc(me())}"><button class="btn" id="cmtGo">Add</button></div></div>
-      <div class="card"><h3 style="margin-top:0">ServiceNow record <span class="muted small">(${esc(t.servicenow.table)}, as it would be sent)</span></h3><pre class="code">${esc(JSON.stringify(t.servicenow, null, 2))}</pre></div></div>`;
+    <div class="card"><h3 style="margin-top:0">Timeline</h3><div class="feed">${t.timeline.map((x) => `<div class="e"><span class="ts">${hm(x.at)}</span> ${who(x.actor, x.human)}<br>${esc(x.text)}</div>`).join("")}</div>
+        <div class="row" style="margin-top:10px"><input id="cmt" placeholder="Add a work note as the ${esc(me())}"><button class="btn" id="cmtGo">Add</button></div>
+        <details style="margin-top:12px"><summary class="small muted">ServiceNow record (${esc(t.servicenow.table)}) as it is mirrored to the client's system of record</summary><pre class="code">${esc(JSON.stringify(t.servicenow, null, 2))}</pre></details></div>`;
   $("#cmtGo").onclick = async () => { await guard(() => api("POST", `/tickets/${id}/comment`, { text: $("#cmt").value }), "Note added"); render(true); };
 };
 
@@ -304,7 +304,7 @@ routes.requests = async () => {
       $("#reqFields").innerHTML = c.fields.map((f) => `<label>${esc(f.label)}</label>${f.options ? `<select data-f="${f.id}">${f.options.map((o) => `<option value="${esc(o)}">${esc(META.nodes[o] || o)}</option>`).join("")}</select>` : `<input data-f="${f.id}">`}`).join("");
     };
     modal(`<h2>Raise a request</h2><label>Catalogue item</label><select id="reqCat">${META.requests.map((c) => `<option value="${c.id}">${esc(c.title)}</option>`).join("")}</select>
-      <label>Requested by (name of the business user)</label><input id="reqBy" value="${esc(me())}"><div id="reqFields"></div>
+      <label>Requested by</label><input id="reqBy" value="Business user"><div id="reqFields"></div>
       <div class="row" style="margin-top:12px"><button class="btn primary" id="reqGo">Submit</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div>`);
     draw(META.requests[0].id);
     $("#reqCat").onchange = (e) => draw(e.target.value);
@@ -316,20 +316,34 @@ routes.requests = async () => {
   };
 };
 
-// ------------------------------------------------------------------ alerts
-routes.alerts = async () => {
-  const r = await api("GET", "/events");
-  const w = r.watch;
-  main().innerHTML = `<h1>Alert stream</h1><div class="sub">What the Watch Desk Agent read from the tools and what happened to each alert</div>
-    <div class="card"><div class="funnel"><span><b>${w.raw || 0}</b> tool reports read</span>→<span><b>${w.alerts || 0}</b> alerting</span>→<span><b>${w.events || 0}</b> after merging repeats</span>→<span><b>${new Set(r.events.map((e) => e.incident).filter(Boolean)).size}</b> incidents</span><span class="muted">· ${w.suppressed || 0} suppressed during approved changes</span></div></div>
-    ${table(["First seen", "Tool", "System", "Alert", "Codes", "Seen", "What happened", "State"], r.events.map((e) => `<tr><td class="mono">${hm(e.first_seen)}</td><td>${esc(e.source)}</td><td>${esc(e.ci)}</td><td>${esc(e.message)}</td><td class="mono small">${esc(e.codes.join(" "))}</td><td>×${e.count}</td>
-      <td class="small">${esc(e.handling)} ${e.incident ? `<a href="#/ticket/${esc(e.incident)}">${esc(e.incident)}</a>` : ""}</td><td>${badge(e.status, e.status === "cleared" ? "b-ok" : e.status === "suppressed" ? "b-violet" : e.severity === "warning" ? "b-warn" : "b-bad")}</td></tr>`), "No alerts yet tonight.")}`;
+// ------------------------------------------------------------------ data needed from tools
+routes.data = async () => {
+  const tab = store.get("owai_dtab", "tools");
+  const d = await api("GET", "/signals");
+  const TYPE = { Log: "b-info", Telemetry: "b-ok", Audit: "b-violet", Metadata: "" };
+  const feeds = d.tools.flatMap((t) => t.feeds.map((f) => ({ ...f, tool: t.tool })));
+  const count = (ty) => feeds.filter((f) => f.type === ty).length;
+  const body = {
+    tools: () => d.tools.map((t) => `<div class="card"><div class="spread"><h3 style="margin:0">${esc(t.tool)}</h3>${t.received ? badge(t.received + (t.received === 1 ? " report" : " reports") + " read tonight", "b-info") : ""}</div>
+      <div class="muted small" style="margin:2px 0 10px"><b>Access needed:</b> ${esc(t.access)}</div>
+      ${table(["Feed", "Type", "What it tells the agents", "Used by", "What that makes possible"], t.feeds.map((f) => `<tr><td><b>${esc(f.name)}</b></td><td>${badge(f.type, TYPE[f.type])}</td><td>${esc(f.gives)}</td><td class="small">${f.agents.map((a) => esc(a)).join("<br>")}</td><td>${esc(f.enables)}</td></tr>`))}</div>`).join(""),
+    agents: () => d.agents.map((name) => { const mine = feeds.filter((f) => f.agents.includes(name.replace(/ Agent$/, ""))); return mine.length ? `<div class="card"><h3 style="margin-top:0">${esc(name)} <span class="muted small">${mine.length} feeds from ${new Set(mine.map((f) => f.tool)).size} tools</span></h3>
+      ${table(["Tool", "Feed", "Type", "What the agent does with it"], mine.map((f) => `<tr><td><b>${esc(f.tool)}</b></td><td>${esc(f.name)}</td><td>${badge(f.type, TYPE[f.type])}</td><td>${esc(f.enables)}</td></tr>`))}</div>` : ""; }).join(""),
+    tonight: () => `<div class="card"><div class="funnel"><span><b>${d.watch.raw || 0}</b> tool reports read</span>→<span><b>${d.watch.alerts || 0}</b> alerting</span>→<span><b>${d.watch.events || 0}</b> after merging repeats</span>→<span><b>${new Set(d.events.map((e) => e.incident).filter(Boolean)).size}</b> incidents</span></div></div>
+      ${table(["First seen", "Tool", "Alert", "Codes", "Seen", "What the agents did with it", "State"], d.events.map((e) => `<tr><td class="mono">${hm(e.first_seen)}</td><td>${esc(e.source)}</td><td>${esc(e.message)}</td><td class="mono small">${esc(e.codes.join(" "))}</td><td>×${e.count}</td>
+      <td class="small">${esc(e.handling)} ${e.incident ? `<a href="#/ticket/${esc(e.incident)}">${esc(e.incident)}</a>` : ""}</td><td>${badge(e.status, e.status === "cleared" ? "b-ok" : e.status === "suppressed" ? "b-violet" : e.severity === "warning" ? "b-warn" : "b-bad")}</td></tr>`), "No alerts yet tonight.")}`,
+  };
+  main().innerHTML = `<h1>Data needed from tools</h1><div class="sub">The logs, telemetry, audit data and metadata each tool must provide for the agents to work. All of it is read-only status and metadata: no business data rows leave the client's systems.</div>
+    <div class="grid g4"><div class="card kpi"><div class="v">${d.tools.length}</div><div class="l">Tools connected</div></div><div class="card kpi"><div class="v">${count("Log")}</div><div class="l">Log feeds</div></div>
+      <div class="card kpi"><div class="v">${count("Telemetry")}</div><div class="l">Telemetry feeds</div></div><div class="card kpi"><div class="v">${count("Audit") + count("Metadata")}</div><div class="l">Audit and metadata feeds</div></div></div>
+    <div class="tabs" style="margin-top:16px">${[["tools", "By tool"], ["agents", "By agent"], ["tonight", "Read tonight"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
+  $$("[data-tab]").forEach((el) => { el.onclick = () => { store.set("owai_dtab", el.dataset.tab); render(); }; });
 };
 
 // ------------------------------------------------------------------ knowledge
 routes.knowledge = async () => {
   const k = await api("GET", "/knowledge");
-  const tab = store.get("owai_ktab", "ke");
+  const tab = store.get("owai_ktab", "ke") === "actions" ? "actions" : "ke";
   const cls = { standard: "b-ok", approval: "b-warn" };
   const body = {
     ke: () => k.known_errors.map((e) => `<details class="ke"><summary>${esc(e.id)} · ${esc(e.title)} <span class="muted">· ${esc(e.tool)}${e.learned_from ? " · learned from " + esc(e.learned_from) : ""}${e.symptom ? " · symptom" : ""}</span></summary>
@@ -340,10 +354,9 @@ routes.knowledge = async () => {
     actions: () => `<p class="muted">The only things an agent can change in the client estate. Everything else is done by a person.</p>
       ${table(["Action", "Tool", "Who must say yes", "How it is done"], k.actions.map((a) => `<tr><td><b>${esc(a.title)}</b><div class="muted small">${esc(a.why)}</div></td><td>${esc(a.tool)}</td><td>${a.class === "approval" ? badge(a.approver_role.replace(/_/g, " ") + " approval", "b-warn") : badge("engineer accepts the plan", "b-ok")}</td><td class="small mono">${esc(a.how)}</td></tr>`))}
       <h2>Never done by an agent</h2>${table(["", "Why"], k.never.map((n) => `<tr><td><b>${esc(n.title)}</b></td><td>${esc(n.why)}</td></tr>`))}`,
-    connectors: () => table(["Tool", "What the agents read", "How", "What the agents can do"], k.connectors.map((c) => `<tr><td><b>${esc(c.tool)}</b></td><td>${esc(c.reads)}</td><td class="small">${esc(c.via)}</td><td class="small">${esc(c.acts)}</td></tr>`)),
   };
   main().innerHTML = `<h1>Known errors and runbooks</h1><div class="sub">What the agents know and what they are allowed to do. Edit the YAML files under <code>operatewithai/knowledge</code> for your client.</div>
-    <div class="tabs">${[["ke", `Known errors (${k.known_errors.length})`], ["actions", "Action catalogue"], ["connectors", "Connected tools"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
+    <div class="tabs">${[["ke", `Known errors (${k.known_errors.length})`], ["actions", "Action catalogue"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
   $$("[data-tab]").forEach((el) => { el.onclick = () => { store.set("owai_ktab", el.dataset.tab); render(); }; });
 };
 
@@ -384,14 +397,13 @@ routes.team = async () => {
     <div class="grid g3">${t.agents.map((a) => { const s = t.stats[a.name]; return `<div class="card agent"><h3>${esc(a.name)}</h3><div class="muted small">${esc(a.seat)}</div><p>${esc(a.mission)}</p>
       <div class="row small">${badge(s.actions + " actions tonight", "b-info")} ${s.open_asks ? badge(s.open_asks + " waiting on people", "b-warn") : ""}</div>
       ${s.last ? `<div class="muted small" style="margin-top:6px">Last: ${hm(s.last.at)} ${esc(s.last.action)}</div>` : ""}
+      ${a.reads.length ? `<div class="lbl">Works from</div><div class="small">${esc(a.reads.join(", "))} · <a href="#/data">feeds</a></div>` : ""}
       <div class="lbl">Responsibilities</div><ul>${a.does.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>
       <div class="lbl">May do alone</div><div class="small">${esc(a.alone)}</div>
       <div class="lbl">Never</div><ul>${a.never.map((d) => `<li>${esc(d)}</li>`).join("")}</ul>
       ${a.asks.length ? `<div class="lbl">Brings in</div><ul>${a.asks.map(([w, y]) => `<li><b>${esc(w)}</b> ${esc(y)}</li>`).join("")}</ul>` : ""}</div>`; }).join("")}</div>
     <h2>The people and what they decide</h2>
-    ${table(["Role", "Decides"], t.decisions.map(([r, w]) => `<tr><td><b>${esc(r)}</b></td><td>${esc(w)}</td></tr>`))}
-    <h2>Tonight's roster</h2>
-    ${table(["Name", "Position", "Tower or role", "Waiting on them"], t.roster.map((p) => `<tr><td><a href="#/inbox" data-as="${esc(p.name)}">${esc(p.name)}</a></td><td>${esc(p.title)}</td><td>${esc(p.tower_name || p.role_text)}</td><td>${p.open ? badge(p.open, "b-warn") : ""}</td></tr>`))}`;
+    ${table(["Seat", "Covers", "Decides", "Waiting on them now"], t.people.map((p) => `<tr><td><a href="#/inbox" data-as="${esc(p.name)}"><b>${esc(p.name)}</b></a></td><td>${esc(p.covers || p.group)}</td><td>${esc(p.decides)}</td><td>${p.open ? badge(p.open, "b-warn") : ""}</td></tr>`))}`;
 };
 
 // ------------------------------------------------------------------ audit
@@ -426,8 +438,8 @@ function setMe(name) { store.set("owai_me", name); $("#personPick").value = name
   try { META = await api("GET", "/meta"); } catch (e) { main().innerHTML = `<div class="card"><div class="notice bad">${esc(e.message)}</div></div>`; return; }
   $("#version").textContent = "v" + META.version;
   const pick = $("#personPick");
-  const group = (label, list) => `<optgroup label="${label}">${list.map((p) => `<option value="${esc(p.name)}">${esc(p.name)} - ${esc(p.title)}</option>`).join("")}</optgroup>`;
-  pick.innerHTML = group("On call", META.people.filter((p) => p.tower)) + group("Managed service leads", META.people.filter((p) => p.role && !/client|data_owner/.test(p.role))) + group("Client", META.people.filter((p) => /client|data_owner/.test(p.role || "")));
+  const group = (label, list) => `<optgroup label="${label}">${list.map((p) => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("")}</optgroup>`;
+  pick.innerHTML = group("On-call engineers", META.people.filter((p) => p.tower)) + group("Managed service leads", META.people.filter((p) => p.role && !/client|data_owner/.test(p.role))) + group("Client", META.people.filter((p) => /client|data_owner/.test(p.role || "")));
   if (META.me) { pick.value = META.me; pick.disabled = true; } else {
     if (!META.people.some((p) => p.name === store.get("owai_me", ""))) {
       const o = await api("GET", "/overview");

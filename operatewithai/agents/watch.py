@@ -14,6 +14,10 @@ def run(ops) -> tuple[list[dict], list[dict]]:
     new, cleared = ops.ingest(alerts)
     stats = ops.store.kv("watch_stats") or {"raw": 0, "alerts": 0, "events": 0, "suppressed": 0}
     stats["raw"] += len(raw)
+    by = stats.setdefault("by_tool", {})
+    for source, _ in raw:
+        tool = "goldengate" if source == "goldengate_log" else source
+        by[tool] = by.get(tool, 0) + 1
     stats["alerts"] += sum(1 for a in alerts if a["severity"] != "clear")
     stats["events"] += len(new)
     for ev in new:

@@ -7,8 +7,10 @@ Dynatrace, AWS/Azure and file-transfer integrations**, with ServiceNow as the sy
 
 The agents do the watching, correlating, checking, drafting and the execution of agreed
 runbook steps. **People make every decision** that changes the client's systems, spends money,
-touches business data or speaks to the client. Each decision is a request to a named person,
-with a response time and an escalation path.
+touches business data or speaks to the client. Each decision is a request to a named seat (for
+example the Oracle DBA on call, the Security Lead, the Incident Manager), with a response time
+and an escalation path. The demo uses seats, not individuals; a real roster maps each seat to
+whoever is on shift.
 
 Part of the ADEF suite next to Build-With-AI; the console shares its look and conventions.
 
@@ -20,7 +22,7 @@ Part of the ADEF suite next to Build-With-AI; the console shares its look and co
 
 Open http://127.0.0.1:8090. It starts a simulated night at a demo client at 01:20 with the
 "typical bad night" preset: an expired Oracle service account, a duplicate vendor file and,
-later, a Power BI gateway outage. Choose who you are in the sidebar, answer your inbox, and
+later, a Power BI gateway outage. Choose which seat you are in the sidebar (Oracle DBA, Incident Manager, Security Lead ...), answer that inbox, and
 move the clock with the buttons at the top. The **Scenario simulator** page starts other nights.
 
 ```bash
@@ -37,7 +39,7 @@ pytest -q
 | 01:10 | Password expires. GoldenGate extract abends (OGG-00664), Informatica fails (CMN_1022). Both carry ORA-28001: **one** P2 incident, routed to the Oracle DBA on call | Watch Desk and Triage agents |
 | 01:10 | Cause confirmed by read-only checks (DBA_USERS, extract report). Four-step plan from runbook KE0003 | Diagnosis and Resolution agents |
 | 01:10 | First stakeholder notice drafted | Comms Agent asks the incident manager |
-| | Accepts the plan | **Oracle DBA** |
+| | Accepts the plan | **Oracle DBA on call** |
 | | Approves the credential rotation | **Security lead** |
 | | Rotates through the vault, starts the extract, waits for lag to clear, restarts the failed workflow | Resolution Agent |
 | | Confirms resolved; post-incident review approved | **DBA**, **SDM** |
@@ -45,6 +47,16 @@ pytest -q
 
 If nobody answers, nothing is changed: the ask escalates to the incident manager and then the
 service delivery manager, the breach is predicted hours ahead and the incident becomes P1.
+
+## What the client has to provide
+
+The **Data needed from tools** page is the onboarding checklist: for each tool, the logs,
+telemetry, audit data and metadata the agents read, the access that takes, which agent uses
+each feed and what that makes possible. For example GoldenGate `ggserr.log` and `INFO ALL`,
+Oracle alert log and `DBA_USERS`, Informatica `REP_WFLOW_RUN` and session logs, Snowflake
+resource monitors and `QUERY_HISTORY`, dbt `run_results.json` and `sources.json`, CloudWatch,
+CloudTrail and the Azure activity log. Everything is read-only status and metadata; no business
+rows. The source is `operatewithai/knowledge/signals.yaml`.
 
 ## The team
 
@@ -68,11 +80,12 @@ Nine agents, each with a written role, limits and the people it brings in. The f
 ```
 operatewithai/
   clients/demo/environment.yaml   the client: systems, data chain, business services and deadlines,
-                                  nightly batch, towers, roster, priority matrix, SLAs, change calendar
+                                  nightly batch, towers, support seats, priority matrix, SLAs, change calendar
   knowledge/kedb.yaml             known errors keyed on real signatures (OGG-01296, ORA-28001, SQL0911N,
                                   DPR-ERR-2109 ...) with diagnostic checks and runbooks
   knowledge/actions.yaml          the only actions an agent may take, with who must approve each
   knowledge/requests.yaml         service request catalogue and approval rules
+  knowledge/signals.yaml          the logs, telemetry, audit data and metadata needed from each tool
   connectors/                     parsers for each tool's own output; ServiceNow record mapping
   engine/                         alerts, tickets and SLA clocks, notifications and escalation, batch projection
   agents/                         the nine agents and their role cards
@@ -97,9 +110,8 @@ The demo runs against a simulated estate so it can be tried without access to an
 client engagement:
 
 1. Replace `clients/demo/environment.yaml` with the client's systems, lineage, deliverables,
-   roster and SLAs.
-2. Point each connector at the real source listed under **Known errors and runbooks >
-   Connected tools** (for example `REP_WFLOW_RUN`, GoldenGate Admin Service, dbt Cloud webhooks,
+   support seats and SLAs.
+2. Give the agents the feeds listed on the **Data needed from tools** page (for example `REP_WFLOW_RUN`, GoldenGate Admin Service, dbt Cloud webhooks,
    Power BI refresh history, the Cognos audit database, Dynatrace problem notifications). The
    parsers already accept those tools' formats; the transport and the action adapters are the
    integration work and are not included.
