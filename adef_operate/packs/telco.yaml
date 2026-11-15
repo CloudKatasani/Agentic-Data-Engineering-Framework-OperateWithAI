@@ -46,5 +46,8 @@ handover_pack:
     - [mart.usage_daily, mart.billing_summary]
   cost_estimate_daily: 60.0
   access_model: ["role:telco_reader SELECT mart.usage_daily", "role:telco_etl ALL raw.*"]
+  object_tags:
+    raw.billing_accounts: [billing]
+    mart.billing_summary: [billing]
   schema_contract:
     raw.billing_accounts: {account_id: string, plan_code: string, msisdn_hash: string}

@@ -54,6 +54,10 @@ class Executor:
         self.log = ws.chainlog("executor", "control/action-log.jsonl")
 
     # -- helpers ------------------------------------------------------------------------
+    def next_act_id(self) -> str:
+        ids = {e["record"].get("act") for e in self.log.entries()}
+        return f"ACT-{len(ids) + 1:03d}"
+
     def _pipeline(self, pipeline_id: Optional[str]) -> Optional[dict]:
         if not pipeline_id:
             return None

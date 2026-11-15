@@ -48,5 +48,9 @@ handover_pack:
     - [raw.outage_events, curated.outages]
   cost_estimate_daily: 40.0
   access_model: ["role:util_reader SELECT mart.daily_consumption", "role:util_etl ALL raw.*"]
+  object_tags:
+    raw.meter_interval_reads: [regulated]
+    curated.meter_interval: [regulated]
+    mart.daily_consumption: [regulated]
   schema_contract:
     raw.meter_interval_reads: {meter_id: string, interval_start: timestamp, kwh: decimal}

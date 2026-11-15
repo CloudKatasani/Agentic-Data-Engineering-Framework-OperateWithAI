@@ -24,12 +24,45 @@ connected (step 4). Every action type starts at L1 (step 5).
 | O3-2 | Collector and adapter operate sections for the launch stack | Contract and simulator adapter done; real adapter blocked on START HERE Q2 | - |
 | O3-3 | Fault injector and the eight library faults | Done | `test_faults_are_deterministic_and_resettable` |
 | O3-4 | Rebind to a second profile | Not started | - |
-| O4-1 to O4-7 | Agents | Not started. Deterministic onboarding tools exist (`engine/onboarding_tools.py`) | Readiness proofs: every library fault fires its expected class |
+| O4-1 | Commander and Onboarding to OG1 | Done (Day 6) | `test_released_golden_product_becomes_operable`, `test_dry_run_alert_volume_is_deterministic` |
+| O4-2 | Sentinel | Done (Day 6) | `test_f03_one_group_not_one_per_downstream_table`, `test_one_group_per_fault` (12 fault and pack pairs) |
+| O4-3 to O4-7 | Diagnosis, Remediation, FinOps, Governance, Problem and Knowledge | Not started | - |
 | O5-1 to O5-4 | Evaluation and launch | Not started | - |
 | Section 11 | API and console | Not started | - |
 
 **Day 2-3 exit check** (OT-01, OT-04, OT-11, OT-12, OT-15): all pass.
 **Day 4-5 exit check** (all eight faults raise the right signals): passes on both packs.
+**Day 6 exit check** (OG1 reached; one group per fault): passes. All 12 fault and pack pairs give
+exactly one group with the right first-failing object, and no signal is dropped.
+
+## Day 6: what the agents do
+
+The Day 6 agents (`adef_operate/agents/`) are rule-based runtimes of their skill contracts,
+because the spec decides severity, grouping and onboarding by rule. They write only
+inside their allowlists, and no model is served yet (the health summary says so).
+
+- **Onboarding** (`agents/onboarding.py`) does not start until OG0 is approved. It drafts
+  the service definition, monitoring spec, runbook and action bindings, then applies its
+  decision rules: no monitor without an owner, no objective without a monitor, and no
+  executable re-run on a non-idempotent pipeline. It dry-runs every monitor over 28 days of
+  simulated history (expected alerts per week), proves each library fault in a sandbox,
+  and requests OG1.
+- **Sentinel** (`agents/sentinel.py`, `engine/correlator.py`) groups signals by product,
+  lineage and time. The most upstream object is the first-failing object. Every signal is
+  labelled `primary`, `downstream-echo` or `duplicate`, and none is dropped. A blocking
+  quality failure or schema drift heads a group of its own. Repeats on later ticks join the
+  same group as duplicates. Upstream notices and recent releases are attached as leads.
+- **Commander** (`agents/commander.py`, `engine/severity.py`) searches before opening: a
+  group with the same first-failing object or detecting monitor is attached to the
+  existing case. A case that only shares the lineage neighbourhood is linked, with the
+  reason. Severity is set by rule and the rule is recorded with what would lower it;
+  Domain Pack overrides can only raise it. Trust status goes through the executor
+  (`set_trust_status`). On-call is paged for S1 and S2. S1 asks for council review, and
+  blocking quality or schema groups ask Remediation to contain. Cost groups route to
+  FinOps. Access groups route to Governance and are escalated at once to Security and
+  Compliance, with no agent action. S4 groups are batched for the weekly review. Nothing
+  is routed while stopped. The Commander also publishes `health/<date>.md`.
+- **Runtime** (`runtime.py`): one tick runs the monitor engine, then Sentinel, then Commander.
 
 ## Guardrail scenarios (section 13.2)
 
@@ -64,11 +97,17 @@ connected (step 4). Every action type starts at L1 (step 5).
 | A7 | Incident state machine extras: `failed -> options-ready or diagnosing`; `options-ready -> verifying` for the "wait" option. | `engine/case_store.py` |
 | A8 | Default daily budgets: model 50, diagnostic query 20, actions 20. A pack can override them. Warn at 80%. | `engine/handover.py` |
 | A9 | The monitor engine keeps running on the last approved spec hash even when OG1 is voided by a runbook edit. Detection is safe; only autonomy drops. | `engine/monitor_engine.py` |
+| A10 | Severity rules. Consumer-facing objects are lineage leaves or objects with a freshness objective. "Regulatory dataset affected" means a quality, volume or schema failure on an object tagged `regulated`. Lateness on a regulated dataset is S2 through the Domain Pack override, not S1. | `engine/severity.py` |
+| A11 | Domain Pack overrides do not apply to S4 (informational) groups, because no dataset is affected. | `engine/severity.py` |
+| A12 | Access groups do not open an INC. Governance opens the GOV; the Commander escalates and routes. Cost groups go to FinOps the same way. | `agents/commander.py` |
+| A13 | When a signal fits both a standalone (quality or schema) group and an ordinary lineage group, it joins the lineage group. | `engine/correlator.py` |
 
-## Next (Days 6 to 10)
+## Next (Days 7 to 10)
 
-1. O4-1 and O4-2: Commander (severity rules with Domain Pack raise-only overrides, case open, link and merge) and Sentinel grouping. F-03 must yield one group.
-2. O4-3 and O4-4: Diagnosis (read-only evidence and hypotheses) and Remediation (ranked options, ACT records through the executor, verification).
+1. Day 7, O4-3 and O4-4: Diagnosis (read-only evidence and hypotheses) and Remediation (ranked options, ACT records through the executor, verification).
+   Diagnosis is the first agent that needs model judgement (hypotheses), so it brings the model seam.
+   Exit check: 7 of 8 causes correct, with evidence.
+2. Sentinel weekly noise report and OG7 tuning proposals. Commander rejection and return counters (2 rejections or 3 returns lead to escalation).
 3. O4-5 to O4-7: FinOps (F-06), Governance (F-07, no action), Problem and Knowledge (post-incident note, replay).
 4. O5-1 and O5-2: replay harness over the fault library, and the full OT-01 to OT-16 suite.
 5. Section 11 API and console, O3-2 real adapter, O3-4 rebind.

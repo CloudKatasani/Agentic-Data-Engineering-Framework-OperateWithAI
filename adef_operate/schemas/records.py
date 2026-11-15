@@ -108,6 +108,8 @@ class Case(_Strict):
     owner: Optional[str] = None
     signals: list[str] = Field(default_factory=list)
     signal_group: Optional[str] = None
+    first_failing_object: Optional[str] = None
+    severity_would_lower: Optional[str] = None
     linked_cases: list[LinkedCase] = Field(default_factory=list)
     detecting_monitors: list[MonitorRef] = Field(default_factory=list)
     trust_status: Optional[TrustStatus] = None

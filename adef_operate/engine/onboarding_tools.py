@@ -123,6 +123,29 @@ def write_service(ws: Workspace, draft: dict[str, Any]) -> None:
     ws.write_yaml("onboarding", "service/action-bindings.yaml", draft["action_bindings"])
 
 
+def check_draft(draft: dict[str, Any]) -> list[str]:
+    """Onboarding decision rules: no monitor without an owner, no objective without a
+    monitor, no executable re-run on a pipeline without an idempotency declaration."""
+    problems = []
+    monitors = draft["monitoring_spec"]["monitors"]
+    sd = draft["service_definition"]
+    for m in monitors:
+        if not m.get("owner"):
+            problems.append(f"monitor {m['id']} has no owner")
+    covered = {m.get("objective") for m in monitors}
+    for o in sd["objectives"]:
+        if o["id"] not in covered:
+            problems.append(f"objective {o['id']} has no monitor")
+    qcovered = {m.get("quality_rule") for m in monitors}
+    idem = {p["id"]: p.get("idempotent") is True for p in sd["pipelines"]}
+    for b in draft["action_bindings"]["bindings"]:
+        if b["executable"] and b["action_type"] in ("retry_failed_task", "rerun_latest_window") \
+                and not idem.get(b["pipeline"]):
+            problems.append(f"binding {b['action_type']} on {b['pipeline']} is executable but the "
+                            "pipeline is not declared idempotent")
+    return problems
+
+
 def readiness(ws: Workspace, pack_name: str,
               adapter_factory: Callable[[], SimulatorAdapter] = SimulatorAdapter) -> dict[str, Any]:
     """Dry-run the spec on a healthy sandbox and prove each fault fires the right class."""
@@ -138,11 +161,23 @@ def readiness(ws: Workspace, pack_name: str,
         fired = {r["signal_class"] for r in evaluate_spec(spec, sim, ws.dp_id) if not r["passed"]}
         proofs[fid] = {"expected": list(fault.signal_classes), "fired": sorted(fired),
                        "ok": set(fault.signal_classes) <= fired}
-    report = {"healthy_alerts": baseline_alerts, "monitors": len(spec["monitors"]), "fault_proofs": proofs,
+    history_alerts: dict[str, int] = {}
+    hist = adapter_factory().history(28)
+    for _, sim in hist:
+        for r in evaluate_spec(spec, sim, ws.dp_id):
+            if not r["passed"]:
+                history_alerts[r["monitor_id"]] = history_alerts.get(r["monitor_id"], 0) + 1
+    total = sum(history_alerts.values())
+    report = {"healthy_alerts": baseline_alerts, "history_days": len(hist),
+              "history_alerts": history_alerts, "expected_alerts_per_week": round(total * 7 / len(hist), 1), "monitors": len(spec["monitors"]), "fault_proofs": proofs,
               "ready": not baseline_alerts and all(p["ok"] for p in proofs.values())}
     lines = [f"# Readiness report - {ws.dp_id}", "",
              f"- Monitors: {report['monitors']}",
-             f"- Alerts on a healthy sandbox (expected alert volume at rest): {len(baseline_alerts)}", "",
+             f"- Alerts on a healthy sandbox: {len(baseline_alerts)}",
+             f"- Dry run over {len(hist)} days of history: {total} alerts, "
+             f"expected {report['expected_alerts_per_week']} per week", "",
+             "| Monitor | Alerts in history |", "|---|---|",
+             *[f"| {m} | {n} |" for m, n in sorted(history_alerts.items())], "",
              "| Fault | Expected classes | Fired classes | OK |", "|---|---|---|---|"]
     for fid, p in proofs.items():
         lines.append(f"| {fid} | {', '.join(p['expected'])} | {', '.join(p['fired'])} | {'yes' if p['ok'] else 'NO'} |")

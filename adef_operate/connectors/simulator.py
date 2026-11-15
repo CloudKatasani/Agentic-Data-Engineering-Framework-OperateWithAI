@@ -95,6 +95,27 @@ class SimulatorAdapter(OperateAdapter):
     def reset(self) -> None:
         self.state = {dp: self._initial_state(pack) for dp, pack in PRODUCT_PACK.items()}
 
+    def history(self, days: int = 28) -> list[tuple[str, "SimulatorAdapter"]]:
+        """Deterministic past days for monitor dry runs. Day ``d`` gets fixed perturbations:
+        d % 14 == 5 late load (+100 min on the first pipeline); d % 9 == 2 volume +20%
+        (inside a 25% band); d % 20 == 7 slow run (2.25x median)."""
+        out = []
+        for d in range(1, days + 1):
+            sim = SimulatorAdapter(self.now - timedelta(days=d))
+            for st in sim.state.values():
+                first = next(iter(st["runs"]))
+                if d % 14 == 5:
+                    for o in st["objects"].values():
+                        if o["pipeline"] == first:
+                            o["lag_minutes"] += 100
+                if d % 9 == 2:
+                    for o in st["objects"].values():
+                        o["rows"] = int(o["rows"] * 1.2)
+                if d % 20 == 7:
+                    st["runs"][first]["duration_min"] = 45.0
+            out.append(((self.now - timedelta(days=d)).date().isoformat(), sim))
+        return out
+
     def snapshot(self) -> dict[str, Any]:
         return copy.deepcopy(self.state)
 

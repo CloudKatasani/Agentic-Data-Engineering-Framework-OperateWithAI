@@ -1,8 +1,8 @@
 """Command line: ``python -m adef_operate demo [--home DIR]`` and ``python -m adef_operate faults``.
 
-``demo`` onboards both golden products into a fresh workspace, records the OG0 and OG1
-approvals as the named approvers in the synthetic packs (simulation only), runs every
-library fault through the monitor engine, and prints what fired.
+``demo`` releases and onboards both golden products, records OG0 and OG1 as the synthetic
+approvers named in the packs (simulation only), then injects each library fault and runs
+one control-plane tick: monitor engine -> Sentinel grouping -> Commander case opening.
 """
 
 from __future__ import annotations
@@ -14,10 +14,9 @@ from pathlib import Path
 
 from .connectors.simulator import FAULTS, SimulatorAdapter
 from .engine.approvals import Approvals
-from .engine.handover import accept_handover
-from .engine.monitor_engine import MonitorEngine
-from .engine.onboarding_tools import draft_service, readiness, write_service
+from .connectors.simulator import SIM_NOW
 from .packs import handover_pack
+from .runtime import OpsRuntime
 
 
 def _approve_as_pack_owners(approvals: Approvals, request_id: str, owners: dict) -> None:
@@ -28,28 +27,40 @@ def _approve_as_pack_owners(approvals: Approvals, request_id: str, owners: dict)
 
 
 def demo(home: Path) -> int:
-    print(f"ADEF_HOME = {home}\n")
+    print(f"ADEF_HOME = {home}\n(Demo Simulator: approvals are recorded as the synthetic approvers in the packs)\n")
     for pack_name in ("utilities", "telco"):
         pack = handover_pack(pack_name)
-        res = accept_handover(pack, home=home, simulated=True)
-        if not res.accepted:
-            print(f"{pack_name}: handover rejected: {res.gaps}")
-            return 1
-        ws, appr = res.workspace, Approvals(res.workspace)
-        _approve_as_pack_owners(appr, res.og0_request, pack["owners"])
-        write_service(ws, draft_service(pack))
-        rep = readiness(ws, pack_name)
-        _approve_as_pack_owners(appr, appr.request_og1().id, pack["owners"])
-        print(f"== {pack['dp_id']} ({pack_name}): {rep['monitors']} monitors, "
-              f"{len(rep['healthy_alerts'])} alerts at rest, {appr.og1_status()[1]}")
         for fid, fault in FAULTS.items():
             if pack_name not in fault.packs:
                 continue
             sim = SimulatorAdapter()
+            rt = OpsRuntime(home / f"{pack_name}-{fid}", sim)
+            res = rt.release({"type": "product.released", "handover_pack": pack})
+            if not res.accepted:
+                print(f"{pack_name}: handover rejected: {res.gaps}")
+                return 1
+            appr = Approvals(res.workspace)
+            _approve_as_pack_owners(appr, res.og0_request, pack["owners"])
+            ob = rt.onboard(pack["dp_id"])
+            if not ob.ready:
+                print(f"{pack_name}: not ready for OG1: {ob.problems}")
+                return 1
+            _approve_as_pack_owners(appr, ob.og1_request, pack["owners"])
+            if fid == next(f for f, x in FAULTS.items() if pack_name in x.packs):
+                print(f"== {pack['dp_id']} ({pack_name}): {ob.report['monitors']} monitors, "
+                      f"expected {ob.report['expected_alerts_per_week']} alerts/week from a 28-day dry run, "
+                      f"{appr.og1_status()[1]}")
             sim.inject(fid, pack_name)
-            sigs = MonitorEngine(ws, sim, simulated=True).run()["signals"]
-            fired = sorted({f"{s['signal_class']}:{s['object']}" for s in sigs})
-            print(f"  {fid} {fault.description}\n     -> {len(sigs)} signals: {', '.join(fired)}")
+            out = rt.tick(pack["dp_id"], SIM_NOW)
+            print(f"  {fid} {fault.description}")
+            print(f"     {len(out['signals'])} signals -> {len(out['groups'])} group(s); first failing: "
+                  f"{', '.join(g['first_failing_object'] for g in out['groups'])}")
+            for o in out["outcomes"]:
+                if o["outcome"] == "opened":
+                    print(f"     {o['case']} {o['rule']} | trust: {o.get('trust_status') or 'unchanged'}")
+                else:
+                    print(f"     {o['outcome']} -> {o.get('routed_to', '')}"
+                          + (f" (escalated to {o['escalated_to']})" if o.get("escalated_to") else ""))
         print()
     return 0
 
