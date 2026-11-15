@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 from ..connectors.simulator import SimulatorAdapter
 from ..core.errors import GuardViolation
 from ..engine.approvals import Approvals
-from ..engine.onboarding_tools import check_draft, draft_service, readiness, write_service
+from ..engine.onboarding_tools import check_draft, draft_service, readiness, readiness_on_exports, write_service
 from ..engine.workspace import Workspace
 
 
@@ -41,7 +41,10 @@ class OnboardingAgent:
         if problems:
             return OnboardingResult(ready=False, report={}, problems=problems)
         write_service(self.ws, draft)
-        report = readiness(self.ws, pack["domain_pack"], self.sandbox_factory)
+        if hasattr(self.sandbox_factory(), "inject_class"):
+            report = readiness_on_exports(self.ws, self.sandbox_factory)
+        else:
+            report = readiness(self.ws, pack["domain_pack"], self.sandbox_factory)
         if not report["ready"]:
             return OnboardingResult(ready=False, report=report,
                                     problems=["sandbox proofs failed; see service/readiness-report.md"])

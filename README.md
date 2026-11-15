@@ -12,9 +12,11 @@ and Knowledge.
 
 ## Status
 
-Days 1 to 9 of the ten-day plan are built and tested: Epics O1, O2 and O4, O3-1, O3-3 and
-O3-4, O5-1 and O5-2. Telemetry translators exist for every tool in Build-With-AI's preset
-Stack Profiles (O3-2 is partly done; live API clients are pending).
+All ten days of the plan are built and tested: Epics O1, O2 and O4, O3-1, O3-3 and O3-4,
+O5-1 and O5-2, and the shadow-mode machinery and go-live rule for O5-3 and O5-4. Telemetry
+translators exist for every tool in Build-With-AI's preset Stack Profiles (O3-2 is partly
+done; live API clients are pending). The real two-week shadow period starts once a real
+product's exports and START HERE answers are available: see [`SHADOW_MODE.md`](SHADOW_MODE.md).
 
 ## Built for the data-engineering stack Build-With-AI produces
 
@@ -69,6 +71,10 @@ python -m adef_operate guardrails --profile example-a
 python -m adef_operate evals --profiles all --out evals-report
 ```
 
+```bash
+python -m adef_operate shadow-rehearsal --profile example-a
+```
+
 The `demo` command releases and onboards both golden products (Utilities and Telco), records
 OG0 and OG1 as the synthetic approvers named in the packs, then injects each library fault
 and runs one tick. A tick runs the monitor engine, then Sentinel grouping, then the
@@ -83,8 +89,10 @@ adef_operate/
                reasoning.py (Reasoner seam and deterministic RuleReasoner)
   simulation.py  golden-product scenarios and the diagnosis accuracy evaluation
   runtime.py   one control-plane tick: monitor engine -> Sentinel -> Commander
+  shadow_mode.py      shadow runtime: read-only onboarding from exports, ticks, observed recovery
+  shadow_rehearsal.py 14-day rehearsal on synthetic exports
   stack/       Build-With-AI Stack Profiles, Operate slot binding, naming, per-tool translators,
-               native-platform emulator, StackAdapter
+               native-platform emulator, StackAdapter, read-only export adapter
   evals/       replay harness (O5-1) and guardrail suite OT-01 to OT-16 (O5-2)
   core/        stand-in for adef-core: hashing, hash-chained log, autonomy levels, errors
   schemas/     SIG, case, ACT, approval, handover pack, service and monitoring-spec models
@@ -103,11 +111,12 @@ adef_operate/
     evidence.py          read-only, metadata-only evidence reader (budgeted; raw values refused)
     council.py           council-of-three review for S1 diagnoses
     isolation.py         client isolation rule
+    shadow.py            START HERE intake, people's conclusions, shadow report, go-live rule
     injection.py         treats log and ticket text as untrusted data
     onboarding_tools.py  draft service files, dry run and fault proofs for OG1
   connectors/  adapter contract (operate section) and the Demo Simulator with faults F-01 to F-08
   packs/       synthetic Utilities and Telco Domain Packs and golden handover packs
   api/         (next: section 11 endpoints)
 skills/        eight SKILL.md contracts (validated by adef_operate.skills_check)
-tests/         foundation, control, signals, day 6 to day 9, skills
+tests/         foundation, control, signals, day 6 to day 10, skills
 ```

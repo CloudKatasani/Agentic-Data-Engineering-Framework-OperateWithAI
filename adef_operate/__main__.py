@@ -102,7 +102,112 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("evals", help="run the replay harness over the fault library")
     e.add_argument("--profiles", default="canonical", help="comma list, or 'all'")
     e.add_argument("--out", type=Path, default=None)
+    t = sub.add_parser("start-here", help="write the START HERE answers template")
+    t.add_argument("--dp", default="<dp_id>")
+    t.add_argument("--profile", default="<stack profile id>")
+    t.add_argument("--out", type=Path, default=None)
+    r = sub.add_parser("shadow-rehearsal", help="14-day shadow-mode rehearsal on synthetic exports")
+    r.add_argument("--profile", default="example-a")
+    r.add_argument("--home", type=Path, default=None)
+    sh = sub.add_parser("shadow", help="shadow mode on a real product from read-only exports")
+    sh.add_argument("action", choices=["release", "onboard", "tick", "report", "go-live-request", "go-live-apply"])
+    sh.add_argument("--home", type=Path, required=True, help="ADEF_HOME for the ops workspaces")
+    sh.add_argument("--profile", help="Stack Profile id")
+    sh.add_argument("--exports", type=Path, help="export root (<root>/<dp_id>/<snapshot>/)")
+    sh.add_argument("--pack", type=Path, help="Operations Handover Pack (YAML) from Build stage 7")
+    sh.add_argument("--answers", type=Path, help="START HERE answers (YAML)")
+    sh.add_argument("--dp")
+    dc = sub.add_parser("decide", help="record a named person's decision on a gate request")
+    dc.add_argument("--home", type=Path, required=True)
+    dc.add_argument("--dp", required=True)
+    dc.add_argument("--request", required=True)
+    dc.add_argument("--as", dest="person", required=True)
+    dc.add_argument("--role", required=True)
+    dc.add_argument("--decision", choices=["approved", "rejected"], required=True)
+    dc.add_argument("--reason", default="")
+    cc = sub.add_parser("conclude", help="record the team's own conclusion (shadow mode)")
+    cc.add_argument("--home", type=Path, required=True)
+    cc.add_argument("--dp", required=True)
+    cc.add_argument("--by", required=True)
+    cc.add_argument("--ticket")
+    cc.add_argument("--case")
+    cc.add_argument("--opened-at")
+    cc.add_argument("--cause")
+    cc.add_argument("--real", choices=["yes", "no"])
+    cc.add_argument("--minutes", type=float)
     args = ap.parse_args(argv)
+    if args.cmd == "start-here":
+        from .engine.shadow import start_here_template
+        text = start_here_template(args.dp, args.profile)
+        if args.out:
+            args.out.write_text(text)
+            print(f"wrote {args.out}")
+        else:
+            print(text)
+        return 0
+    if args.cmd == "shadow-rehearsal":
+        from .shadow_rehearsal import run_rehearsal
+        res = run_rehearsal(args.home, args.profile)
+        for l in res["log"]:
+            print(f"day {l['day']:2} {l['snapshot']} fault={l['fault'] or '-':5} signals={l['signals']} "
+                  f"opened={l['opened']} recovered={l['recovered']} routed={l['routed']}")
+        print()
+        print((Path(res["workspace"]) / res["report_path"]).read_text())
+        return 0
+    if args.cmd == "decide":
+        from .engine.approvals import Approvals
+        from .engine.workspace import Workspace
+        ws = Workspace(args.dp, args.home)
+        a = Approvals(ws)
+        req = a.get_request(args.request)
+        a.decide(args.request, approver=args.person, role=args.role, decision=args.decision,
+                 artifact_hash=req.artifact_hash, reason=args.reason)
+        print(f"{args.request} {req.gate}: {a.status(args.request)}")
+        return 0
+    if args.cmd == "conclude":
+        from .engine.shadow import record_conclusion
+        from .engine.workspace import Workspace
+        rec = record_conclusion(Workspace(args.dp, args.home), by=args.by, ticket=args.ticket, case_id=args.case,
+                                opened_at=args.opened_at, cause_class=args.cause,
+                                real_problem=None if args.real is None else args.real == "yes",
+                                minutes_spent=args.minutes)
+        print(f"recorded: {rec}")
+        return 0
+    if args.cmd == "shadow":
+        import yaml as _y
+        from .engine import shadow as _sh
+        from .engine.workspace import Workspace
+        from .shadow_mode import ShadowRuntime
+        if args.action in ("release", "onboard", "tick"):
+            if not (args.profile and args.exports):
+                ap.error("--profile and --exports are required")
+            rt = ShadowRuntime(args.home, args.profile, args.exports)
+        if args.action == "release":
+            pack, answers = _y.safe_load(args.pack.read_text()), _y.safe_load(args.answers.read_text())
+            res = rt.release(pack, answers)
+            print(_y.safe_dump(res, sort_keys=False))
+            return 0 if res["accepted"] else 1
+        if args.action == "onboard":
+            ob = rt.onboard(args.dp)
+            print(f"ready={ob.ready} og1_request={ob.og1_request} problems={ob.problems}")
+            return 0 if ob.ready else 1
+        if args.action == "tick":
+            for out in rt.run_new_snapshots(args.dp):
+                print(f"opened={out['cases_opened']} recovered={out['recovered']} signals={len(out['signals'])}")
+            return 0
+        ws = Workspace(args.dp, args.home)
+        if args.action == "report":
+            rep = _sh.shadow_report(ws)
+            path = _sh.write_report(ws, rep)
+            print(ws.read(path))
+            return 0
+        if args.action == "go-live-request":
+            rep = _sh.shadow_report(ws)
+            print("requested", _sh.request_go_live(ws, _sh.write_report(ws, rep)))
+            return 0
+        _sh.apply_go_live(ws)
+        print(f"{args.dp} is live; action types stay at L1 until each is promoted at OG7")
+        return 0
     if args.cmd == "profiles":
         for pid in list_profiles():
             p = load_profile(pid)

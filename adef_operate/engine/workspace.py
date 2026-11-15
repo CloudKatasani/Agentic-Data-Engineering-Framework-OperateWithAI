@@ -22,19 +22,19 @@ FOLDERS = [
     "service/tuning-proposals",
     "signals/groups", "signals/monitor-results",
     "cases", "change-requests", "problems", "finops/findings",
-    "governance/drift", "knowledge/runbook-changes", "evals/replays", "health",
+    "governance/drift", "knowledge/runbook-changes", "evals/replays", "health", "shadow",
 ]
 
 # Agent identities (one per skill) and code identities.
 AGENTS = ("commander", "onboarding", "sentinel", "diagnosis", "remediation",
           "finops", "governance", "knowledge")
 CODE = ("collector", "monitor_engine", "case_store", "executor", "approvals", "registry",
-        "escalations", "council")
+        "escalations", "council", "shadow")
 
 ALLOW: dict[str, list[str]] = {
     "commander": ["cases/*/case.yaml", "cases/*/notice-draft.md", "health/**",
                   "control/approval-requests/**", "control/service.yaml",
-                  "control/handover-pack.yaml"],
+                  "control/handover-pack.yaml", "control/start-here.yaml"],
     "onboarding": ["service/**"],
     "sentinel": ["signals/groups/**", "signals/noise-report-*.md", "service/tuning-proposals/**"],
     "diagnosis": ["cases/*/impact.md", "cases/*/evidence/**", "cases/*/diagnosis.md",
@@ -55,6 +55,7 @@ ALLOW: dict[str, list[str]] = {
     "registry": ["control/registry.yaml", "control/budget-ledger.jsonl"],
     "escalations": ["control/escalations.jsonl"],
     "council": ["cases/*/council.yaml"],
+    "shadow": ["shadow/**"],
 }
 
 DENY: dict[str, list[str]] = {

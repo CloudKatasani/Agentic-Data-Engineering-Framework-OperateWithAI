@@ -245,6 +245,9 @@ class RemediationAgent:
         raise GuardViolation(f"choose a ranked option from options.md; {action_type} is not one")
 
     def act(self, case_id: str, option_no: int) -> dict:
+        if self.registry.mode() == "shadow":
+            raise GuardViolation("shadow mode: options are recorded for comparison with the team's own response; "
+                                 "nothing is executed or requested")
         case = self.cases.get(case_id)
         opt = next((o for o in self.options(case_id) if o.no == option_no), None)
         if opt is None:

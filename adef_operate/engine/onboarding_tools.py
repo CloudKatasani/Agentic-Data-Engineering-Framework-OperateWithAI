@@ -185,3 +185,40 @@ def readiness(ws: Workspace, pack_name: str,
     lines += ["", f"Ready for OG1: {'yes' if report['ready'] else 'no'}"]
     ws.write("onboarding", "service/readiness-report.md", "\n".join(lines) + "\n")
     return report
+
+
+def readiness_on_exports(ws: Workspace, adapter_factory: Callable[[], Any]) -> dict[str, Any]:
+    """Readiness for a real product read from exports: dry-run on prior snapshots, report alerts
+    on the latest snapshot (real data may legitimately alert), and prove each monitor class fires
+    on a synthetic overlay of the latest snapshot."""
+    spec = yaml.safe_load(ws.read("service/monitoring-spec.yaml"))
+    latest = adapter_factory()
+    at_rest = [r["monitor_id"] for r in evaluate_spec(spec, latest, ws.dp_id) if not r["passed"]]
+    history_alerts: dict[str, int] = {}
+    hist = latest.history(28)
+    for _, past in hist:
+        for r in evaluate_spec(spec, past, ws.dp_id):
+            if not r["passed"]:
+                history_alerts[r["monitor_id"]] = history_alerts.get(r["monitor_id"], 0) + 1
+    classes = sorted({m["signal_class"] for m in spec["monitors"]})
+    proofs = {}
+    for cls in classes:
+        a = adapter_factory()
+        a.inject_class(cls)
+        fired = {r["signal_class"] for r in evaluate_spec(spec, a, ws.dp_id) if not r["passed"]}
+        proofs[f"synthetic-{cls}"] = {"expected": [cls], "fired": sorted(fired), "ok": cls in fired}
+    total = sum(history_alerts.values())
+    report = {"healthy_alerts": at_rest, "history_days": len(hist), "history_alerts": history_alerts,
+              "expected_alerts_per_week": round(total * 7 / len(hist), 1) if hist else None,
+              "monitors": len(spec["monitors"]), "fault_proofs": proofs,
+              "ready": all(p["ok"] for p in proofs.values())}
+    lines = [f"# Readiness report - {ws.dp_id} (read-only exports)", "",
+             f"- Monitors: {report['monitors']}",
+             f"- Alerts on the latest snapshot: {len(at_rest)} {at_rest or ''} (real data; reviewed at OG1, not a blocker)",
+             f"- Dry run over {len(hist)} prior snapshot(s): {total} alerts"
+             + (f", expected {report['expected_alerts_per_week']} per week" if hist else ""), "",
+             "| Synthetic fault (overlay on a copy of the latest snapshot) | Fired classes | OK |", "|---|---|---|",
+             *[f"| {k} | {', '.join(p['fired'])} | {'yes' if p['ok'] else 'NO'} |" for k, p in proofs.items()], "",
+             f"Ready for OG1: {'yes' if report['ready'] else 'no'}"]
+    ws.write("onboarding", "service/readiness-report.md", "\n".join(lines) + "\n")
+    return report

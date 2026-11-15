@@ -145,8 +145,17 @@ class CommanderAgent:
 
         outcome = {"group": g["id"], "outcome": "opened", "case": case.id, "severity": a.severity,
                    "rule": a.rule_text, "linked": [r.id for r in related]}
-        outcome["trust_status"] = self._set_trust(case.id, a.severity)
-        if a.severity in ("S1", "S2"):
+        shadow = self.registry.mode() == "shadow"
+        if shadow:
+            would = {"S1": "do-not-use", "S2": "degraded"}.get(a.severity)
+            outcome["trust_status"] = None
+            outcome["shadow_would"] = [x for x in (f"set trust status {would}" if would else None,
+                                                    "page on-call" if a.severity in ("S1", "S2") else None) if x]
+            self.cases.update(case.id, by=self.identity, note="shadow mode: would " +
+                              (", ".join(outcome["shadow_would"]) or "take no outward action") + "; nothing sent")
+        else:
+            outcome["trust_status"] = self._set_trust(case.id, a.severity)
+        if a.severity in ("S1", "S2") and not shadow:
             on_call = self.svc_config.get("on_call", "UNNAMED")
             self.pager.page(to=on_call, role="on_call", case_id=case.id,
                             subject=f"{case.id} {a.severity} {self.ws.dp_id}: {a.rule_text}")
@@ -167,6 +176,8 @@ class CommanderAgent:
         owner = ROUTES[g["family"]]
         record = {"group": g["id"], "routed_to": owner, "objects": g["objects"]}
         if g["family"] == "access":
+            # Deliberate exception to shadow mode: a suspected security event always reaches
+            # Security and Compliance, because the team's own process may not have seen it.
             escalate(self.ws, by=self.identity, to="security_compliance",
                      reason=f"{g['id']}: access outside the approved model on {', '.join(g['objects'])}; "
                             "suspected security event, no agent action")
@@ -203,6 +214,8 @@ class CommanderAgent:
         if stop:
             raise ExecutorBlocked(f"stopped ({stop}); the Commander requests nothing")
         appr = Approvals(self.ws)
+        if self.registry.mode() == "shadow":
+            decision_asked = "[SHADOW - recorded for comparison; not sent to approvers] " + decision_asked
         for r in appr._records("request"):
             if r["artifact_hash"] == artifact_hash and r["gate"] == gate and appr.status(r["id"]) == "pending":
                 return appr.get_request(r["id"])

@@ -33,7 +33,8 @@ connected (step 4). Every action type starts at L1 (step 5).
 | O4-7 | Problem and Knowledge | Done (Day 8) | `test_post_incident_note_replay_and_close`, `test_autonomy_proposal_from_platform_track_record` |
 | O5-1 | Replay harness with labelled causes | Done (Day 9) | `test_o51_harness_meets_targets_and_rebind_is_consistent`; `python -m adef_operate evals --profiles all` |
 | O5-2 | Guardrail set (section 13.2) | Done (Day 9): 16 of 16, scripted and repeatable on any profile | `test_o52_guardrail_scenario[OT-01..OT-16]`; `python -m adef_operate guardrails --profile <id>` |
-| O5-3, O5-4 | Shadow mode, go or no-go | Not started (Day 10; needs START HERE answers) | - |
+| O5-3 | Shadow mode on a real non-production product for two weeks | Machinery done (Day 10): shadow mode, START HERE intake, read-only export adapter, the team's conclusions, report. Rehearsed for 14 days on synthetic exports. **The real two weeks start when a real product's exports and START HERE answers arrive.** | `tests/test_day10.py`; `python -m adef_operate shadow-rehearsal` |
+| O5-4 | Go or no-go against section 13.3 | Rule enforced (Day 10): `shadow_report` decision; OG7 go-live request tied to the report hash; no promotion above L1 before an approved go-live; synthetic periods refused | `test_go_live_rule_enforced`, `test_synthetic_rehearsal_cannot_request_go_live` |
 | Section 11 | API and console | Not started | - |
 
 **Day 2-3 exit check** (OT-01, OT-04, OT-11, OT-12, OT-15): all pass.
@@ -224,6 +225,47 @@ pairs on the canonical simulator and the six Build presets), plus healthy negati
 The usual caveat applies: the library and the rules were written together. Shadow mode
 (O5-3) is the real measure, and time to diagnose and to recover are measured there.
 
+## Day 10: shadow mode
+
+See [`SHADOW_MODE.md`](SHADOW_MODE.md) for the operator guide (steps, export layout, and
+the read-only source for each file on each tool).
+
+- **Shadow is a mode, not a convention.** `control/service.yaml` holds `mode: demo | shadow | live`.
+  - In shadow mode every action type is capped at L1 and the executor runs nothing.
+  - The Commander records what it *would* have done (trust status, page) and sends nothing. The exception is a suspected security event, which still reaches Security and Compliance.
+  - Gate requests are labelled `[SHADOW ...]`, and Remediation refuses to act.
+- **START HERE intake** (`engine/shadow.py`). A template and validator for the five questions:
+  - first service, non-production;
+  - Stack Profile, plus one read-only identity per Operate slot, verified by a named person;
+  - on-call and approvers, where the Service Owner and Platform Owner must differ;
+  - documented idempotent pipelines, with each other pipeline treated as not idempotent;
+  - baseline figures, plus the suite-assumption confirmation.
+- **Read-only export adapter** (`stack/export.py`).
+  - Your platform team exports metadata with read-only identities. Operate parses the files with the Day 9 translators and holds no credentials.
+  - It has no actions by construction.
+  - Onboarding readiness on exports dry-runs prior snapshots, lists alerts on the real latest snapshot, and proves every monitor class fires on a synthetic overlay of a copy of it.
+- **Shadow runtime** (`shadow_mode.py`). Each new snapshot runs a tick: detect, group, open, diagnose, draft options. Operate also observes recovery achieved by the team (no attempt counted). Once a person confirms the cause, the post-incident note, replay and close follow. Snapshots taken before the shadow start are refused.
+- **People's conclusions.** Named people record tickets (by ID only), causes, real-or-not judgements and minutes spent. These go in a hash-chained log.
+- **Shadow report and go/no-go.** The report covers:
+  - period;
+  - diagnosis accuracy against people's conclusions;
+  - alert precision from people's judgements;
+  - unsupported causes;
+  - executions;
+  - missed tickets;
+  - detection lead over the team's ticket;
+  - human minutes per case;
+  - the baseline.
+
+  The decision is GO only when the section 13.3 go-live rule holds. A GO allows an OG7
+  go-live request tied to the report's hash. Editing the report voids it. Live mode then
+  allows promotions, each still at OG7.
+- **Rehearsal** (`python -m adef_operate shadow-rehearsal`). 14 days on synthetic `example-a` exports of the Utilities product: 5 incidents diagnosed and closed after observed recovery, F-06 and F-07 routed, one problem record for the recurring late file, one missed ticket reported, 0 executions. The decision is GO, and the go-live request is refused because the data is synthetic.
+
+**Day 10 exit check ("first real product onboarded read-only"):** the machinery is ready
+and rehearsed. Onboarding a real product needs your exports and START HERE answers, which
+are not available in this environment.
+
 ## Assumptions made during the build (please confirm)
 
 | # | Assumption | Where |
@@ -254,13 +296,19 @@ The usual caveat applies: the library and the rules were written together. Shado
 | A24 | Gold volume is the row count of the latest window (a capped A0 query or a system view). The volume band is the mean of the last 4 same-weekday counts, computed in the adapter. | `stack/translators.py` |
 | A25 | The golden products belong to two different synthetic clients (`client-u`, `client-t`), so OT-16 isolation is exercised. Same-client reuse goes through OG1. | `engine/isolation.py` |
 | A26 | Evidence reads used by Diagnosis and FinOps (run history, batch checksums, region breakdown, query history) still pass through as metadata. Signals, cost totals and governance state are fully translated. | `stack/adapter.py` |
+| A27 | Shadow-mode go-live thresholds: at least 14 days, at least 5 incidents with a human-confirmed cause, at least 90 percent of agent cases judged by a person, plus the section 13.3 targets. | `engine/shadow.py` |
+| A28 | Shadow mode still escalates a suspected security event to Security and Compliance. Everything else outward-facing is recorded as "would do". | `agents/commander.py` |
+| A29 | In shadow mode, recovery is observed when every detecting monitor passes on a later snapshot. It counts no attempt and executes nothing. | `shadow_mode.py` |
+| A30 | The first real product is reached through read-only metadata exports rather than live API access, so Operate holds no credentials during shadow mode. Live API clients come with go-live. | `stack/export.py` |
 
-## Next (Day 10 and after)
+## Next
 
-1. Day 10, O5-3: shadow mode on a real non-production product, read-only. It needs the START HERE answers: the first product, which tools fill the slots (one of Build's presets, or the client's profile), read-only identities, and approvers.
-2. O3-2: live API clients behind the translators for the chosen profile, with each one's conformance test (every signal read returns a valid SIG on the sandbox; every action runs and reverses).
-3. Section 11 API and console.
-4. O5-4: go or no-go against section 13.3 after two weeks of shadow mode.
+The ten-day plan is complete apart from the real shadow period itself.
+
+1. **Start the real shadow period (O5-3).** This needs your START HERE answers, the handover pack for a non-production product, and daily exports. Then run two weeks and review the report.
+2. **Live API clients (O3-2) for the chosen profile**, each with its conformance test. These are only needed after go-live.
+3. **Section 11 API and console.**
+4. **Model-backed reasoner** behind the Diagnosis `Reasoner` seam. Measure it against the rule reasoner on the shadow replays before switching.
 
 ## Open questions (START HERE FIRST)
 

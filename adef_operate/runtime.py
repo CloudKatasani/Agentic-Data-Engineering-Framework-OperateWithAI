@@ -50,4 +50,5 @@ class OpsRuntime:
             reviews["finops"] = FinOpsAgent(ws, self.adapter, commander).review(day)
         if "adef-ops-governance-compliance" in routed:
             reviews["governance"] = GovernanceAgent(ws, self.adapter, commander).review(day, at=at)
-        return {"signals": detected["signals"], "groups": groups, "outcomes": outcomes, "reviews": reviews}
+        return {"signals": detected["signals"], "results": detected["results"], "groups": groups,
+                "outcomes": outcomes, "reviews": reviews}

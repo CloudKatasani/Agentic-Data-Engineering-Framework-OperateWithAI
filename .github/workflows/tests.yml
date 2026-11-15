@@ -13,3 +13,4 @@ jobs:
       - run: pytest -q
       - run: python -m adef_operate guardrails --profile example-a
       - run: python -m adef_operate evals --profiles all --out evals-report
+      - run: python -m adef_operate shadow-rehearsal --profile example-b

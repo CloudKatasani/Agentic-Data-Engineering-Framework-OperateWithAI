@@ -79,6 +79,11 @@ class ServiceConfig(_Model):
     budgets: dict[str, float]
     simulated: bool = False
     stack_profile: Optional[dict[str, str]] = None
+    # demo: Demo Simulator golden product (go-live rule not applied).
+    # shadow: real product, read-only; every action capped at L1, nobody paged, nothing written.
+    # live: only after an approved go-live decision (O5-4).
+    mode: Literal["demo", "shadow", "live"] = "demo"
+    data_origin: str = "demo-simulator"
 
 
 class Monitor(_Model):

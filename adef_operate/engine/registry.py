@@ -66,6 +66,8 @@ class Registry:
         if stop:
             return Level.L0, f"stopped: {stop}"
         lvl = self.stored_level(action_type)
+        if self.mode() == "shadow":
+            return min(lvl, Level.L1), "shadow mode: observe and propose only"
         valid, why = Approvals(self.ws).og1_status(at)
         if not valid and lvl > Level.L1:
             return Level.L1, why
@@ -77,11 +79,20 @@ class Registry:
         approvals.require(approval_id, gate="OG7", artifact_hash=artifact_hash)
         entry = lookup(action_type)
         new = Level.parse(level)
+        if new > Level.L1 and self.mode() != "demo":
+            from .shadow import go_live_status
+            ok, why = go_live_status(self.ws)
+            if not ok:
+                raise ApprovalError(f"go-live rule: no action type is raised above L1 before an approved go-live "
+                                    f"decision ({why})")
         if new > entry.highest:
             raise ApprovalError(f"{action_type} cannot exceed {entry.highest.name}")
         data = self.load()
         data["levels"][action_type] = new.name
         self.save(data)
+
+    def mode(self) -> str:
+        return (self.ws.read_yaml("control/service.yaml") or {}).get("mode", "demo")
 
     # -- earned autonomy (O2-4) -----------------------------------------------------
     def record_outcome(self, action_type: str, *, verified: bool, case_id: str | None = None) -> None:
