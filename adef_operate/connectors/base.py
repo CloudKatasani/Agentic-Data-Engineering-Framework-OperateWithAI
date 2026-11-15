@@ -73,7 +73,7 @@ class OperateAdapter(ABC):
     def releases(self, product: str) -> list[dict]:
         return []
 
-    def profile(self, product: str, obj: str, column: str) -> dict:
+    def profile_column(self, product: str, obj: str, column: str) -> dict:
         return {}
 
     def cost_breakdown(self, product: str) -> dict:

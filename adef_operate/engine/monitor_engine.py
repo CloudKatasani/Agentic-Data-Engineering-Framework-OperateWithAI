@@ -50,9 +50,11 @@ def _evaluate(m: dict[str, Any], reading: dict[str, Any]) -> tuple[bool, Any, An
     if kind == "burn_rate":
         return reading["burn_rate"] <= rule["max_burn"], reading["burn_rate"], rule["max_burn"], "error budget burn"
     if kind == "cost_ratio":
-        ratio = reading["daily"] / max(reading["estimate"], 1e-9)
+        # The estimate is the design's (in the spec); the platform only reports actual spend.
+        estimate = rule.get("estimate_daily") or reading.get("estimate")
+        ratio = reading["daily"] / max(estimate, 1e-9)
         return (ratio <= rule["max_ratio"], round(ratio, 3), rule["max_ratio"],
-                f"daily {reading['daily']} vs estimate {reading['estimate']}; full scans {reading.get('full_scans', 0)}"
+                f"daily {reading['daily']} vs estimate {estimate}; full scans {reading.get('full_scans', 0)}"
                 + (f" on {reading['top_object']}" if reading.get("top_object") else ""))
     if kind == "access_model":
         outside = [g for g in reading["grants"] if g not in rule["allowed"]]

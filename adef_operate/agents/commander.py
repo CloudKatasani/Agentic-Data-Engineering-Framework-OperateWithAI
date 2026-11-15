@@ -44,9 +44,19 @@ class CommanderAgent:
     # -- T1 ---------------------------------------------------------------------------
     @staticmethod
     def accept(event: dict[str, Any], *, home: str | Path | None = None,
-               simulated: bool = False) -> ReceiverResult:
-        """Receiver check; reject once with the full list of gaps; on success request OG0."""
-        return on_product_released(event, home=home, simulated=simulated)
+               simulated: bool = False, stack_profile: Optional[dict] = None) -> ReceiverResult:
+        """Receiver check (pack and Stack Profile); reject once with all gaps; on success request OG0."""
+        return on_product_released(event, home=home, simulated=simulated, stack_profile=stack_profile)
+
+    def record_rebind(self, stack_profile: dict, *, by: str) -> None:
+        """Record a rebind in service.yaml. Case records, monitoring spec and runbook are untouched."""
+        svc = self.svc_config
+        old = (svc.get("stack_profile") or {}).get("profile_id")
+        svc["stack_profile"] = {"profile_id": stack_profile["profile_id"],
+                                "profile_version": stack_profile.get("profile_version", "")}
+        self.ws.write_yaml(self.identity, "control/service.yaml", svc)
+        self.ws.append(self.identity, "health/rebinds.jsonl",
+                       json.dumps({"from": old, "to": stack_profile["profile_id"], "by": by}))
 
     # -- context ----------------------------------------------------------------------
     @property

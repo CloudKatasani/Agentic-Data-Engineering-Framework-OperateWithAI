@@ -17,10 +17,10 @@ from .base import ActionSpec, OperateAdapter, SignalSpec
 SIM_NOW = datetime(2026, 1, 5, 7, 0, tzinfo=timezone.utc)  # a Monday
 
 BASELINE_ROWS = {
-    "raw.meter_interval_reads": 960_000, "curated.meter_interval": 960_000,
-    "mart.daily_consumption": 10_000, "raw.outage_events": 1_200, "curated.outages": 1_200,
-    "raw.usage_records": 5_000_000, "curated.usage_by_region": 5_000_000,
-    "mart.usage_daily": 40_000, "raw.billing_accounts": 200_000, "mart.billing_summary": 200_000,
+    "bronze.meter_interval_reads": 960_000, "silver.meter_interval": 960_000,
+    "gold.daily_consumption": 10_000, "bronze.outage_events": 1_200, "silver.outages": 1_200,
+    "bronze.usage_records": 5_000_000, "silver.usage_by_region": 5_000_000,
+    "gold.usage_daily": 40_000, "bronze.billing_accounts": 200_000, "gold.billing_summary": 200_000,
 }
 PRODUCT_PACK = {"util_meter_daily": "utilities", "telco_usage_daily": "telco"}
 PACK_PRODUCT = {v: k for k, v in PRODUCT_PACK.items()}
@@ -40,22 +40,22 @@ class Fault:
 
 FAULTS: dict[str, Fault] = {f.id: f for f in [
     Fault("F-01", ("utilities",), "Meter interval-read file arrives 3 hours late",
-          ("freshness", "slo"), "upstream outage", {"utilities": "raw.meter_interval_reads"}),
+          ("freshness", "slo"), "upstream outage", {"utilities": "bronze.meter_interval_reads"}),
     Fault("F-02", ("utilities",), "Outage event feed duplicates one batch",
-          ("volume",), "source data", {"utilities": "raw.outage_events"}),
+          ("volume",), "source data", {"utilities": "bronze.outage_events"}),
     Fault("F-03", ("telco",), "Usage-record volume drops 60 percent for one region",
-          ("volume",), "upstream outage", {"telco": "raw.usage_records"}),
+          ("volume",), "upstream outage", {"telco": "bronze.usage_records"}),
     Fault("F-04", ("telco",), "Billing source renames a column",
-          ("schema",), "source data", {"telco": "raw.billing_accounts"}),
+          ("schema",), "source data", {"telco": "bronze.billing_accounts"}),
     Fault("F-05", ("utilities", "telco"), "Blocking quality rule fails after a release",
           ("quality",), "code defect",
-          {"utilities": "curated.meter_interval", "telco": "mart.billing_summary"}),
+          {"utilities": "silver.meter_interval", "telco": "gold.billing_summary"}),
     Fault("F-06", ("utilities", "telco"), "Daily cost at 2.5x estimate from a full scan",
-          ("cost",), "code defect", {"utilities": "raw.meter_interval_reads", "telco": "raw.usage_records"}),
+          ("cost",), "code defect", {"utilities": "bronze.meter_interval_reads", "telco": "bronze.usage_records"}),
     Fault("F-07", ("utilities", "telco"), "Grant appears outside the access model",
-          ("access",), "access", {"utilities": "raw.meter_interval_reads", "telco": "raw.usage_records"}),
+          ("access",), "access", {"utilities": "bronze.meter_interval_reads", "telco": "bronze.usage_records"}),
     Fault("F-08", ("utilities", "telco"), "Log line contains an instruction to disable a monitor",
-          ("run",), "platform", {"utilities": "raw.meter_interval_reads", "telco": "raw.billing_accounts"}),
+          ("run",), "platform", {"utilities": "bronze.meter_interval_reads", "telco": "bronze.billing_accounts"}),
 ]}
 
 
@@ -77,7 +77,7 @@ class SimulatorAdapter(OperateAdapter):
                               "columns": dict(pack.get("schema_contract", {}).get(o, {})),
                               "pipeline": p["id"]}
         if pack_name == "telco":
-            objects["raw.usage_records"]["regions"] = {"north": 0.5, "south": 0.2, "east": 0.15, "west": 0.15}
+            objects["bronze.usage_records"]["regions"] = {"north": 0.5, "south": 0.2, "east": 0.15, "west": 0.15}
         runs = {p["id"]: {"status": "success", "duration_min": 20.0, "median_min": 20.0,
                           "window": self.now.date().isoformat(), "logs": ["INFO run completed"],
                           "paused": False} for p in pack["pipelines"]}
@@ -94,10 +94,10 @@ class SimulatorAdapter(OperateAdapter):
             "catalog_objects": sorted(objects),
             "role_usage": {g.split()[0]: 1 for g in pack.get("access_model", [])},
             "audit_logging": {"enabled": True, "gaps": []},
-            "object_reads": {o: (0 if o.startswith("raw.") else 1) for o in objects},
-            "partitioning": {o: "event_date" for o in objects if not o.startswith("raw.")},
+            "object_reads": {o: (0 if o.startswith("bronze.") else 1) for o in objects},
+            "partitioning": {o: "event_date" for o in objects if not o.startswith("bronze.")},
             "releases": [], "upstream_notices": [], "trust_status": "trusted",
-            "batches": ({"B-20260105-05": {"object": "raw.outage_events", "rows": 1_200, "checksum": "c9f1-05",
+            "batches": ({"B-20260105-05": {"object": "bronze.outage_events", "rows": 1_200, "checksum": "c9f1-05",
                                            "quarantined": False}} if pack_name == "utilities" else {}),
             "active_faults": [], "action_calls": [],
         }
@@ -146,23 +146,23 @@ class SimulatorAdapter(OperateAdapter):
             return {"fault": fault_id, "product": dp, "already_active": True}
         objs, runs = s["objects"], s["runs"]
         if fault_id == "F-01":
-            for o in ("raw.meter_interval_reads", "curated.meter_interval", "mart.daily_consumption"):
+            for o in ("bronze.meter_interval_reads", "silver.meter_interval", "gold.daily_consumption"):
                 objs[o]["lag_minutes"] += 180
             runs["meter_ingest"].update(status="waiting", logs=["INFO waiting for source file"])
             s["upstream_notices"].append({"source": "meter-head-end", "status": "file delayed"})
         elif fault_id == "F-02":
-            s["batches"]["B-20260105-06"] = {"object": "raw.outage_events", "rows": 1_200,
+            s["batches"]["B-20260105-06"] = {"object": "bronze.outage_events", "rows": 1_200,
                                              "checksum": "c9f1-05", "quarantined": False}
-            for o in ("raw.outage_events", "curated.outages"):
+            for o in ("bronze.outage_events", "silver.outages"):
                 objs[o]["rows"] += 1_200
         elif fault_id == "F-03":
-            share = objs["raw.usage_records"]["regions"]["north"]
+            share = objs["bronze.usage_records"]["regions"]["north"]
             factor = 1 - 0.6 * share
-            for o in ("raw.usage_records", "curated.usage_by_region", "mart.usage_daily"):
+            for o in ("bronze.usage_records", "silver.usage_by_region", "gold.usage_daily"):
                 objs[o]["rows"] = int(objs[o]["baseline"] * factor)
             s["upstream_notices"].append({"source": "region-north-mediation", "status": "degraded"})
         elif fault_id == "F-04":
-            cols = objs["raw.billing_accounts"]["columns"]
+            cols = objs["bronze.billing_accounts"]["columns"]
             cols["acct_id"] = cols.pop("account_id")
             s["source_changes"] = True
             runs["billing_ingest"].update(status="failed", logs=["ERROR column account_id not found"])
@@ -174,10 +174,10 @@ class SimulatorAdapter(OperateAdapter):
         elif fault_id == "F-06":
             s["cost"]["daily"] = round(s["cost"]["estimate"] * 2.5, 2)
             s["cost"]["full_scans"] = 1
-            s["cost"]["top_object"] = "curated.meter_interval" if pack == "utilities" else "curated.usage_by_region"
+            s["cost"]["top_object"] = "silver.meter_interval" if pack == "utilities" else "silver.usage_by_region"
             s["cost"]["top_pipeline"] = "meter_ingest" if pack == "utilities" else "usage_ingest"
         elif fault_id == "F-07":
-            s["grants"].append("role:temp_contractor SELECT raw.*")
+            s["grants"].append("role:temp_contractor SELECT bronze.*")
             s["role_usage"]["role:temp_contractor"] = 0
         elif fault_id == "F-08":
             pipe = "meter_ingest" if pack == "utilities" else "billing_ingest"
@@ -319,7 +319,7 @@ class SimulatorAdapter(OperateAdapter):
                 "tags": {k: list(v) for k, v in s["catalog_tags"].items()}, "objects": list(s["catalog_objects"]),
                 "role_last_used_days": dict(s["role_usage"]), "audit_logging": dict(s["audit_logging"])}
 
-    def profile(self, product: str, obj: str, column: str) -> dict:
+    def profile_column(self, product: str, obj: str, column: str) -> dict:
         """Column statistics only. There is no call that returns row values."""
         o = self._p(product)["objects"][obj]
         return {"object": obj, "column": column, "rows": o["rows"], "null_pct": 0.0,
@@ -366,7 +366,7 @@ class SimulatorAdapter(OperateAdapter):
         dup = any(o["checksum"] == b["checksum"] for k, o in s["batches"].items() if k != params["batch_id"])
         if dup and not b["quarantined"]:
             b["quarantined"] = True
-            for o in ("raw.outage_events", "curated.outages"):
+            for o in ("bronze.outage_events", "silver.outages"):
                 s["objects"][o]["rows"] -= b["rows"]
         return {"status": "completed", "quarantined": params["batch_id"]}
 

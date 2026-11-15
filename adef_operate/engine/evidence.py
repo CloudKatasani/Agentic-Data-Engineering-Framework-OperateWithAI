@@ -133,7 +133,7 @@ class EvidenceReader:
                          {"outside": outside, "grant_count": len(grants)})
 
     def profile(self, obj: str, column: str) -> Evidence:
-        stats = self.adapter.profile(self.ws.dp_id, obj, column)
+        stats = self.adapter.profile_column(self.ws.dp_id, obj, column)
         return self._add("profile", f"profiling:{obj}.{column}", f"statistics only for {obj}.{column}", stats)
 
     def raw_values(self, obj: str, column: str, *, reason: str = "") -> None:

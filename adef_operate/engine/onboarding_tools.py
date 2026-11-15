@@ -72,7 +72,8 @@ def draft_service(pack: dict[str, Any]) -> dict[str, Any]:
             add(f"MON-DQ-{r['id']}", "quality", r["object"], {"kind": "quality_rule", "rule_id": r["id"]},
                 "S2", pipe, quality_rule=r["id"])
     first_obj = pack["pipelines"][0]["objects"][0]
-    add("MON-COST", "cost", first_obj, {"kind": "cost_ratio", "max_ratio": 1.5}, "S4")
+    add("MON-COST", "cost", first_obj, {"kind": "cost_ratio", "max_ratio": 1.5,
+                                        "estimate_daily": pack.get("cost_estimate_daily")}, "S4")
     add("MON-ACCESS", "access", first_obj, {"kind": "access_model", "allowed": pack.get("access_model", [])}, "S2")
 
     bindings = []

@@ -17,7 +17,7 @@ from adef_operate.schemas import ActionRecord
 N = iter(range(1, 10_000))
 
 
-def act(p, action_type, *, case_id="INC-001", pipeline=None, target="raw.meter_interval_reads", **kw):
+def act(p, action_type, *, case_id="INC-001", pipeline=None, target="bronze.meter_interval_reads", **kw):
     params = kw.pop("params", {})
     return ActionRecord(id=f"ACT-{next(N):03d}", case_id=case_id, product=p.ws.dp_id,
                         action_type=action_type, pipeline=pipeline, target=target, params=params,
@@ -66,7 +66,7 @@ def test_ot01_non_idempotent_rerun_blocked(telco):
     telco.promote("retry_failed_task", "L3")
     with pytest.raises(ExecutorBlocked, match="not declared idempotent"):
         telco.executor.execute(act(telco, "retry_failed_task", pipeline="usage_ingest",
-                                   target="raw.usage_records"))
+                                   target="bronze.usage_records"))
 
 
 def test_ot04_third_retry_blocked_and_escalated(util):
@@ -102,13 +102,13 @@ def test_pause_requires_blocking_evidence_and_downstream(util):
     util.promote("pause_pipeline", "L3")
     with pytest.raises(ExecutorBlocked, match="blocking quality"):
         util.executor.execute(act(util, "pause_pipeline", pipeline="meter_ingest",
-                                  downstream_impact=["mart.daily_consumption"]))
+                                  downstream_impact=["gold.daily_consumption"]))
     util.sim.inject("F-05", "utilities")
     sig = next(s for s in util.engine.run()["signals"] if s["signal_class"] == "quality")
     with pytest.raises(ExecutorBlocked, match="downstream"):
         util.executor.execute(act(util, "pause_pipeline", pipeline="meter_ingest", evidence=[sig["id"]]))
     out = util.executor.execute(act(util, "pause_pipeline", pipeline="meter_ingest", evidence=[sig["id"]],
-                                    downstream_impact=["mart.daily_consumption"]))
+                                    downstream_impact=["gold.daily_consumption"]))
     assert out["outcome"] == "executed"
 
 
@@ -117,12 +117,12 @@ def test_quarantine_needs_path_and_batch_evidence(util):
     util.promote("quarantine_batch", "L3")
     util.sim.inject("F-02", "utilities")
     with pytest.raises(ExecutorBlocked, match="batch ID"):
-        util.executor.execute(act(util, "quarantine_batch", pipeline="outage_ingest", target="raw.outage_events",
+        util.executor.execute(act(util, "quarantine_batch", pipeline="outage_ingest", target="bronze.outage_events",
                                   params={"batch_id": "B-20260105-06"}))
     with pytest.raises(ExecutorBlocked, match="quarantine path"):
         util.executor.execute(act(util, "quarantine_batch", pipeline="meter_ingest",
                                   params={"batch_id": "B-1"}, evidence=["batch:B-1"]))
-    util.executor.execute(act(util, "quarantine_batch", pipeline="outage_ingest", target="raw.outage_events",
+    util.executor.execute(act(util, "quarantine_batch", pipeline="outage_ingest", target="bronze.outage_events",
                               params={"batch_id": "B-20260105-06"}, evidence=["batch:B-20260105-06"]))
 
 
@@ -179,10 +179,10 @@ def test_approval_rules(util):
 def test_ot08_drop_from_telemetry_alone_blocked(util):
     open_case(util)
     util.promote("drop_object", "L2")
-    a = act(util, "drop_object", target="curated.outages", evidence=["telemetry:no reads 90d"])
+    a = act(util, "drop_object", target="silver.outages", evidence=["telemetry:no reads 90d"])
     with pytest.raises(ExecutorBlocked, match="lineage and usage"):
         util.executor.execute(_approved_a3(util, a, "OG4"))
-    b = act(util, "drop_object", target="curated.outages",
+    b = act(util, "drop_object", target="silver.outages",
             evidence=["telemetry:no reads 90d", "lineage:no downstream", "usage:no Consume reads 90d"])
     assert util.executor.execute(_approved_a3(util, b, "OG4"))["outcome"] == "executed"
 
@@ -264,7 +264,7 @@ def test_action_count_budget(util):
     util.executor.execute(act(util, "rerun_latest_window", pipeline="meter_ingest", params={"window": "2026-01-05"}))
     with pytest.raises(ExecutorBlocked, match="budget"):
         util.executor.execute(act(util, "rerun_latest_window", pipeline="outage_ingest",
-                                  target="raw.outage_events", params={"window": "2026-01-05"}))
+                                  target="bronze.outage_events", params={"window": "2026-01-05"}))
 
 
 def test_emergency_stop(util, home):

@@ -1,11 +1,18 @@
 # Synthetic Telco pack for the Demo Simulator. No vendor names; no real data.
 domain_pack:
   id: telco
+  build_pack: {pack_id: telco, pack_version: "0.1.0", source: "Build-With-AI skills/adef-stack-binding/assets/domain-pack.telco.yaml"}
+  controls:
+    - {id: TEL-C1, text: "Subscriber usage, call-detail and location data are Restricted; metadata-only for agents.", checked_by: [grants, masking]}
+    - {id: TEL-C2, text: "Consent and purpose limits are modelled as data and enforced in consumption.", checked_by: []}
+    - {id: TEL-C3, text: "Retention periods for usage and billing data are explicit per dataset and enforced.", checked_by: [retention]}
+    - {id: TEL-C4, text: "Payment data stays out of analytical stores unless tokenised.", checked_by: [classification]}
   severity_overrides:
     - match: {object_tag: billing}
       min_severity: S2
       reason: Billing dataset
 handover_pack:
+  client_id: client-t
   dp_id: telco_usage_daily
   name: Daily usage and billing summary
   domain_pack: telco
@@ -21,41 +28,41 @@ handover_pack:
     tech_lead: Tia Lead
   on_call: Oncall Telco
   objectives:
-    - {id: OBJ-1, kind: freshness, object: mart.usage_daily, target: 180, unit: minutes}
-    - {id: OBJ-2, kind: completeness, object: raw.usage_records, target: 25, unit: pct_band}
+    - {id: OBJ-1, kind: freshness, object: gold.usage_daily, target: 180, unit: minutes}
+    - {id: OBJ-2, kind: completeness, object: bronze.usage_records, target: 25, unit: pct_band}
   pipelines:
     - id: usage_ingest
       owner: Oncall Telco
       idempotent: false
       rollback_ref: runbook#usage-rollback
-      objects: [raw.usage_records, curated.usage_by_region, mart.usage_daily]
+      objects: [bronze.usage_records, silver.usage_by_region, gold.usage_daily]
       schedule: "daily 02:00"
     - id: billing_ingest
       owner: Oncall Telco
       idempotent: true
       rollback_ref: runbook#billing-rollback
-      objects: [raw.billing_accounts, mart.billing_summary]
+      objects: [bronze.billing_accounts, gold.billing_summary]
       schedule: "daily 03:00"
   quality_rules:
-    - {id: DQ-T1, object: mart.billing_summary, blocking: true, description: Every account has a plan}
+    - {id: DQ-T1, object: gold.billing_summary, blocking: true, description: Every account has a plan}
   consumers: [billing-ops, finance-reporting]
   lineage:
-    - [raw.usage_records, curated.usage_by_region]
-    - [curated.usage_by_region, mart.usage_daily]
-    - [raw.billing_accounts, mart.billing_summary]
-    - [mart.usage_daily, mart.billing_summary]
+    - [bronze.usage_records, silver.usage_by_region]
+    - [silver.usage_by_region, gold.usage_daily]
+    - [bronze.billing_accounts, gold.billing_summary]
+    - [gold.usage_daily, gold.billing_summary]
   cost_estimate_daily: 60.0
-  access_model: ["role:telco_reader SELECT mart.usage_daily", "role:telco_etl ALL raw.*"]
+  access_model: ["role:telco_reader SELECT gold.usage_daily", "role:telco_etl ALL bronze.*"]
   object_tags:
-    raw.billing_accounts: [billing]
-    mart.billing_summary: [billing]
+    bronze.billing_accounts: [billing]
+    gold.billing_summary: [billing]
   restricted_columns:
-    raw.billing_accounts: [msisdn_hash]
+    bronze.billing_accounts: [msisdn_hash]
   masking_policies:
-    raw.billing_accounts.msisdn_hash: mask-hash-v1
+    bronze.billing_accounts.msisdn_hash: mask-hash-v1
   retention_days:
-    raw.usage_records: 365
-    raw.billing_accounts: 365
+    bronze.usage_records: 365
+    bronze.billing_accounts: 365
   privileged_roles: [role:telco_etl]
   schema_contract:
-    raw.billing_accounts: {account_id: string, plan_code: string, msisdn_hash: string}
+    bronze.billing_accounts: {account_id: string, plan_code: string, msisdn_hash: string}

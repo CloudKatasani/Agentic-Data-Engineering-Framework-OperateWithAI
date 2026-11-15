@@ -1,0 +1,117 @@
+# Vendored from Build-With-AI adef/catalog/stacks.py (preset example-a, profile_version 2.0.0).
+# Operate reads the same Stack Profile; only telemetry adapters differ. No secrets in this file.
+profile_id: example-a
+label: "Oracle \u2192 AWS S3 Iceberg \u2192 Snowflake"
+description: Oracle to S3 with AWS DMS, Iceberg tables in the Glue catalog curated
+  with Glue Spark, served zero-copy from Snowflake.
+profile_version: 2.0.0
+portability_required: false
+executable_locally: false
+variables:
+  org_prefix: acme
+  domain: customer
+  lake_root: s3://acme-lake
+environments:
+  dev:
+    purpose: sandbox
+    agent_max_class: A1
+    secrets_ref: secrets/adef/dev
+  test:
+    purpose: shared
+    agent_max_class: A2
+    secrets_ref: secrets/adef/test
+  prod:
+    purpose: production
+    agent_max_class: A0
+    secrets_ref: secrets/adef/prod
+slots:
+  lineage:
+    tool: openlineage
+    version: current
+  virtualization:
+    tool: none
+    reason: not required for v1
+  ai_consumption:
+    tool: none
+    reason: not required for v1
+  itsm:
+    tool: servicenow
+    version: current
+  approval_channel:
+    tool: adef-console
+    version: current
+  source_database:
+    tool: oracle
+    version: current
+  cloud:
+    tool: aws
+    version: current
+  object_storage:
+    tool: s3
+    version: current
+  table_format:
+    tool: iceberg
+    version: current
+  lake_catalog:
+    tool: aws-glue-catalog
+    version: current
+  ingestion:
+    tool: aws-dms
+    version: current
+  lakehouse_compute:
+    tool: aws-glue
+    version: current
+  transformation:
+    tool: spark-sql
+    version: current
+  compute_engine:
+    tool: snowflake
+    version: current
+  orchestration:
+    tool: airflow
+    version: current
+  data_quality:
+    tool: great-expectations
+    version: current
+  catalog_governance:
+    tool: collibra
+    version: current
+  semantic_layer:
+    tool: platform-native
+    version: current
+  bi:
+    tool: power-bi
+    version: current
+  version_control:
+    tool: github
+    version: current
+  cicd:
+    tool: github-actions
+    version: current
+  iac:
+    tool: terraform
+    version: current
+  secrets:
+    tool: aws-secrets-manager
+    version: current
+  observability:
+    tool: platform-native
+    version: current
+limits:
+  max_compute_size: S
+  auto_suspend_seconds: 60
+  query_timeout_seconds: 120
+  profiling_row_cap: 10000
+  monthly_cost_cap: 500
+standards:
+  layers:
+  - bronze
+  - silver
+  - gold
+  - serving
+  naming_case: upper_snake
+  history_default: type-2
+  timezone: UTC
+  branch_strategy: trunk-with-feature-branches
+  protected_branches:
+  - main

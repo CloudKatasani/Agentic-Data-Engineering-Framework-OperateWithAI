@@ -77,11 +77,11 @@ def test_rejected_with_defer_reason_is_deferred(u):
 def test_unused_needs_telemetry_usage_and_lineage(t):
     # Telemetry alone: no finding (OT-08 at the agent level).
     assert t.finops.unused_objects(None) == []
-    # raw.* have no reads but have downstream lineage; leaves have reads: nothing is unused.
+    # bronze.* have no reads but have downstream lineage; leaves have reads: nothing is unused.
     assert t.finops.unused_objects({o: 0 for o in t.sim.state[t.dp]["object_reads"]}) == []
-    t.sim.state[t.dp]["object_reads"]["mart.billing_summary"] = 0
-    assert t.finops.unused_objects({"mart.billing_summary": 0}) == ["mart.billing_summary"]
-    res = t.finops.review(usage_signals={"mart.billing_summary": 0})
+    t.sim.state[t.dp]["object_reads"]["gold.billing_summary"] = 0
+    assert t.finops.unused_objects({"gold.billing_summary": 0}) == ["gold.billing_summary"]
+    res = t.finops.review(usage_signals={"gold.billing_summary": 0})
     f = res["findings"][0]
     assert "A3 drop_object at OG4" in t.ws.read(f"finops/findings/{f['id']}.md")
 
@@ -106,7 +106,7 @@ def test_f07_found_and_no_action_taken(pack, home):
     g = gov["raised"][0]
     assert g["type"] == "Grant outside the model" and g["exposure"]
     md = sc.ws.read(f"governance/drift/{g['id']}.md")
-    assert "role:temp_contractor SELECT raw.*" in md and "Consumer impact of the correction" in md
+    assert "role:temp_contractor SELECT bronze.*" in md and "Consumer impact of the correction" in md
     assert Approvals(sc.ws).get_request(g["approval"]).gate == "OG5"
     assert any(e["to"] == "security_compliance" and g["id"] in e["reason"] for e in escalations(sc.ws))
     # No agent action: grants unchanged, nothing executed.
@@ -126,8 +126,8 @@ def test_repeat_review_does_not_duplicate_findings(u):
 
 def test_masking_retention_classification_and_logging_drift(u):
     st = u.sim.state[u.dp]
-    st["masking"].pop("raw.meter_interval_reads.meter_id")
-    st["retention"]["raw.outage_events"] = 30
+    st["masking"].pop("bronze.meter_interval_reads.meter_id")
+    st["retention"]["bronze.outage_events"] = 30
     st["catalog_objects"].append("scratch.tmp_extract")
     st["audit_logging"]["gaps"] = ["2026-01-04T02:00/03:00"]
     res = u.governance.review(at=SIM_NOW)
@@ -148,7 +148,7 @@ def test_waiver_and_expired_waiver(u):
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     u.sim.inject("F-07", "utilities")
-    key = "grant:role:temp_contractor SELECT raw.*"
+    key = "grant:role:temp_contractor SELECT bronze.*"
     appr = Approvals(u.ws)
     req = appr.request(gate="OG5", decision_asked="waiver: contractor read access for migration",
                        artifact_hash=text_hash(key), requested_by="commander", expires=now + timedelta(days=7))
@@ -163,7 +163,7 @@ def test_correction_by_people_is_verified(u):
     g = u.tick()["reviews"]["governance"]["raised"][0]
     u.approve(g["approval"])
     assert not u.governance.verify_correction(g["id"])  # not yet corrected
-    u.sim.state[u.dp]["grants"].remove("role:temp_contractor SELECT raw.*")  # people revoke
+    u.sim.state[u.dp]["grants"].remove("role:temp_contractor SELECT bronze.*")  # people revoke
     assert u.governance.verify_correction(g["id"])
     assert u.commander.cases.get(g["id"]).state == "resolved"
 
@@ -238,7 +238,7 @@ def test_problem_opened_when_object_fails_three_times(u):
     ids = []
     for _ in range(3):
         c = cs.open("INC", by="commander", severity="S3", severity_rule="test")
-        cs.update(c.id, by="commander", note="x", first_failing_object="raw.meter_interval_reads")
+        cs.update(c.id, by="commander", note="x", first_failing_object="bronze.meter_interval_reads")
         ids.append(c.id)
     prb = u.knowledge.check_problems(ids[-1])
     assert prb and u.ws.has(f"problems/{prb}.md")

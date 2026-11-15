@@ -248,6 +248,7 @@ class GovernanceAgent:
                  *[f"| {c} | {e} | `{p}` |" for c, e, p in ENFORCEMENT], "",
                  "## Log integrity (hash chain)",
                  *[f"- `{p}`: {'verified' if ok else ('NOT VERIFIED' if ok is False else 'absent')}" for p, ok in chain.items()],
+                 "", "## Domain Pack controls in scope", *self._pack_controls(),
                  "", "## Approvals in the record", f"- {len(reqs)} request(s); see `control/approvals.jsonl`", "",
                  "## Governance findings", *([f"- {c.id} [{c.state}] {c.timeline[0].event}" for c in gov] or ["- none"]),
                  "", "## Not covered",
@@ -256,6 +257,18 @@ class GovernanceAgent:
         text = "\n".join(lines)
         self.ws.write(self.identity, f"governance/evidence-pack-{period}.md", text)
         return text
+
+    def _pack_controls(self) -> list[str]:
+        from ..packs import domain_pack
+        dp = domain_pack(self.pack.get("domain_pack", ""))
+        src = (dp.get("build_pack") or {})
+        rows = [f"Source: Build-With-AI domain pack `{src.get('pack_id', dp.get('id'))}` "
+                f"v{src.get('pack_version', '?')}", "", "| Control | Checked by | Coverage |", "|---|---|---|"]
+        for c in dp.get("controls", []):
+            by = c.get("checked_by") or []
+            rows.append(f"| {c['id']}: {c['text']} | {', '.join(CONTROLS[b] for b in by) or '-'} | "
+                        f"{'partial: automated checks above' if by else 'not covered by an automated check'} |")
+        return rows if dp.get("controls") else ["- none listed"]
 
     def entitlements(self, period: str) -> str:
         live = self.adapter.governance_state(self.ws.dp_id)

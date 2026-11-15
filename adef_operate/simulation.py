@@ -17,12 +17,20 @@ from .engine.approvals import Approvals
 from .engine.workspace import Workspace
 from .packs import handover_pack
 from .runtime import OpsRuntime
+from .stack import StackAdapter, load_profile
 
 
 class Scenario:
-    def __init__(self, home: str | Path, pack_name: str):
+    """A golden product on the Demo Simulator, optionally bound to a Build-With-AI Stack
+    Profile (``profile``), in which case every telemetry read goes through that profile's
+    native payloads and translators."""
+
+    def __init__(self, home: str | Path, pack_name: str, profile: Optional[str] = None):
         self.sim = SimulatorAdapter()
-        self.rt = OpsRuntime(home, self.sim)
+        self.profile = load_profile(profile) if profile else None
+        self.adapter = StackAdapter.over(self.profile, self.sim) if self.profile else self.sim
+        factory = (lambda: StackAdapter.over(self.profile, SimulatorAdapter())) if self.profile else None
+        self.rt = OpsRuntime(home, self.adapter, stack_profile=self.profile, sandbox_factory=factory)
         self.pack_name = pack_name
         self.pack = handover_pack(pack_name)
         self.dp = self.pack["dp_id"]
@@ -46,40 +54,51 @@ class Scenario:
             a.decide(request_id, approver=self.pack["owners"][role], role=role, decision=decision,
                      artifact_hash=r.artifact_hash, reason=reason or "Demo Simulator approver")
 
+    def rebind(self, profile: str, *, by: str = "Pat Platform") -> None:
+        """Bind the same live product to another Stack Profile (O3-4)."""
+        from .stack import validate_operate
+        self.profile = load_profile(profile)
+        gaps = validate_operate(self.profile)["blocking"]
+        if gaps:
+            raise ValueError(f"cannot rebind: {gaps}")
+        self.adapter = StackAdapter.over(self.profile, self.sim)
+        self.rt.adapter = self.adapter
+        self.commander.record_rebind(self.profile, by=by)
+
     def tick(self, at: Optional[datetime] = None) -> dict:
         return self.rt.tick(self.dp, at or SIM_NOW)
 
     @property
     def commander(self) -> CommanderAgent:
-        return CommanderAgent(self.ws, self.sim, self.rt.pager)
+        return CommanderAgent(self.ws, self.adapter, self.rt.pager)
 
     @property
     def diagnosis(self) -> DiagnosisAgent:
-        return DiagnosisAgent(self.ws, self.sim)
+        return DiagnosisAgent(self.ws, self.adapter)
 
     @property
     def remediation(self) -> RemediationAgent:
-        return RemediationAgent(self.ws, self.sim)
+        return RemediationAgent(self.ws, self.adapter)
 
     @property
     def finops(self) -> FinOpsAgent:
-        return FinOpsAgent(self.ws, self.sim, self.commander)
+        return FinOpsAgent(self.ws, self.adapter, self.commander)
 
     @property
     def governance(self) -> GovernanceAgent:
-        return GovernanceAgent(self.ws, self.sim, self.commander)
+        return GovernanceAgent(self.ws, self.adapter, self.commander)
 
     @property
     def knowledge(self) -> KnowledgeAgent:
-        return KnowledgeAgent(self.ws, self.sim, self.commander)
+        return KnowledgeAgent(self.ws, self.adapter, self.commander)
 
 
-def diagnosis_accuracy(home: str | Path) -> dict:
+def diagnosis_accuracy(home: str | Path, profile: Optional[str] = None) -> dict:
     """Run every library fault on every pack it applies to; compare cause class with the label."""
     rows = []
     for fid, fault in FAULTS.items():
         for pack in fault.packs:
-            sc = Scenario(Path(home) / f"{fid}-{pack}", pack)
+            sc = Scenario(Path(home) / f"{fid}-{pack}", pack, profile)
             sc.sim.inject(fid, pack)
             out = sc.tick()
             o = out["outcomes"][0]

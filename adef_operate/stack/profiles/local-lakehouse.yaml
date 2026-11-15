@@ -1,0 +1,118 @@
+# Vendored from Build-With-AI adef/catalog/stacks.py (preset local-lakehouse, profile_version 2.0.0).
+# Operate reads the same Stack Profile; only telemetry adapters differ. No secrets in this file.
+profile_id: local-lakehouse
+label: Local lakehouse (runs on this machine)
+description: Synthetic source database (SQLite, or a real Oracle/Db2 container) to
+  Delta tables on local disk, curated with DuckDB and served from a DuckDB analytics
+  database. Every pipeline really executes.
+profile_version: 2.0.0
+portability_required: false
+executable_locally: true
+variables:
+  org_prefix: acme
+  domain: customer
+  lake_root: lake
+environments:
+  dev:
+    purpose: sandbox
+    agent_max_class: A1
+    secrets_ref: adef-vault/dev
+  test:
+    purpose: shared
+    agent_max_class: A2
+    secrets_ref: adef-vault/test
+  prod:
+    purpose: production
+    agent_max_class: A0
+    secrets_ref: adef-vault/prod
+slots:
+  lineage:
+    tool: openlineage
+    version: current
+  virtualization:
+    tool: none
+    reason: not required for v1
+  ai_consumption:
+    tool: none
+    reason: not required for v1
+  itsm:
+    tool: none
+    reason: not required for v1
+  approval_channel:
+    tool: adef-console
+    version: current
+  source_database:
+    tool: sqlite-local
+    version: current
+  cloud:
+    tool: local
+    version: current
+  object_storage:
+    tool: local-filesystem
+    version: current
+  table_format:
+    tool: delta
+    version: current
+  lake_catalog:
+    tool: sqlite-catalog
+    version: current
+  ingestion:
+    tool: adef-local-extract
+    version: current
+  lakehouse_compute:
+    tool: duckdb-local
+    version: current
+  transformation:
+    tool: duckdb-sql
+    version: current
+  compute_engine:
+    tool: duckdb-local
+    version: current
+  orchestration:
+    tool: adef-runner
+    version: current
+  data_quality:
+    tool: native-metrics
+    version: current
+  catalog_governance:
+    tool: adef-local-catalog
+    version: current
+  semantic_layer:
+    tool: none
+    reason: not required for v1
+  bi:
+    tool: adef-console
+    version: current
+  version_control:
+    tool: github
+    version: current
+  cicd:
+    tool: github-actions
+    version: current
+  iac:
+    tool: none
+    reason: not required for v1
+  secrets:
+    tool: adef-vault
+    version: current
+  observability:
+    tool: adef-console
+    version: current
+limits:
+  max_compute_size: S
+  auto_suspend_seconds: 60
+  query_timeout_seconds: 120
+  profiling_row_cap: 10000
+  monthly_cost_cap: 500
+standards:
+  layers:
+  - bronze
+  - silver
+  - gold
+  - serving
+  naming_case: lower_snake
+  history_default: type-2
+  timezone: UTC
+  branch_strategy: trunk-with-feature-branches
+  protected_branches:
+  - main

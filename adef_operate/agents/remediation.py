@@ -295,6 +295,13 @@ class RemediationAgent:
         if state == "rejected":
             reason = next(d.reason for d in self.approvals.decisions(doc["approval_id"]) if d.decision == "rejected")
             self._save_act(act, "rejected", approval_id=doc["approval_id"], reason=reason)
+            root = self.ws.path(f"cases/{case_id}/actions")
+            rejected = sum(1 for p in root.glob("ACT-*.yaml") if (self.ws.read_yaml(
+                f"cases/{case_id}/actions/{p.name}") or {}).get("status") == "rejected")
+            if rejected >= 2:
+                from ..engine.escalation import escalate
+                escalate(self.ws, by=self.identity, to="platform_owner", case_id=case_id,
+                         reason=f"{case_id}: {rejected} approval requests rejected; escalate instead of re-asking")
             if self.cases.get(case_id).state == "awaiting-approval":
                 self.cases.transition(case_id, "options-ready", by=self.identity, note=f"rejected: {reason}")
             return {"act": act_id, "status": "rejected", "reason": reason}

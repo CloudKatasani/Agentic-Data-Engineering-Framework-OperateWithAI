@@ -64,7 +64,7 @@ def test_ot06_injection_in_logs_is_data(util):
 def test_f03_echoes_downstream(telco):
     telco.sim.inject("F-03", "telco")
     objs = {s["object"] for s in telco.engine.run()["signals"] if s["signal_class"] == "volume"}
-    assert objs == {"raw.usage_records", "curated.usage_by_region", "mart.usage_daily"}
+    assert objs == {"bronze.usage_records", "silver.usage_by_region", "gold.usage_daily"}
 
 
 def test_signal_ids_are_unique_across_runs(util):

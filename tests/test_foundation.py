@@ -54,7 +54,7 @@ def test_path_escape_rejected(home):
 # -- O1-3 / O2-5 -----------------------------------------------------------------------
 def _inc(p):
     return p.cases.open("INC", by="commander", severity="S2", severity_rule="objective breached",
-                        detecting_monitors=["MON-FRESH-mart.daily_consumption"])
+                        detecting_monitors=["MON-FRESH-gold.daily_consumption"])
 
 
 def test_illegal_transition_has_specific_message(util):
@@ -99,7 +99,7 @@ def _recover(util):
     with pytest.raises(GuardViolation, match="lacks passing results"):
         util.cases.transition(case.id, "recovered", by="remediation")
     res = util.engine.run()["results"]
-    rid = next(r["id"] for r in res if r["monitor_id"] == "MON-FRESH-mart.daily_consumption")
+    rid = next(r["id"] for r in res if r["monitor_id"] == "MON-FRESH-gold.daily_consumption")
     c = util.cases.transition(case.id, "recovered", by="remediation", verification_results=[rid])
     assert c.state == "recovered"
     return case, rid
@@ -125,7 +125,7 @@ def test_close_rejected_when_monitor_disabled(util):
     util.cases.transition(case.id, "reviewed", by="knowledge")
     spec = util.ws.read_yaml("service/monitoring-spec.yaml")
     for m in spec["monitors"]:
-        if m["id"] == "MON-FRESH-mart.daily_consumption":
+        if m["id"] == "MON-FRESH-gold.daily_consumption":
             m["enabled"] = False
     util.ws.write_yaml("onboarding", "service/monitoring-spec.yaml", spec)
     with pytest.raises(GuardViolation, match="disabled"):
@@ -138,7 +138,7 @@ def test_close_rejected_when_threshold_loosened(util):
     util.cases.transition(case.id, "reviewed", by="knowledge")
     spec = util.ws.read_yaml("service/monitoring-spec.yaml")
     for m in spec["monitors"]:
-        if m["id"] == "MON-FRESH-mart.daily_consumption":
+        if m["id"] == "MON-FRESH-gold.daily_consumption":
             m["rule"]["max_lag_minutes"] = 9999
     util.ws.write_yaml("onboarding", "service/monitoring-spec.yaml", spec)
     with pytest.raises(GuardViolation, match="changed since detection"):

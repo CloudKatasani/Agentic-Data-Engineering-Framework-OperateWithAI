@@ -16,7 +16,7 @@ dev = ["pytest>=8"]
 include = ["adef_operate*"]
 
 [tool.setuptools.package-data]
-adef_operate = ["packs/*.yaml"]
+adef_operate = ["packs/*.yaml", "stack/profiles/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -46,6 +46,7 @@ class HandoverPack(_Model):
     dp_id: str
     name: str
     domain_pack: str
+    client_id: str = "default"
     regulated: bool = False
     owners: dict[str, str]
     on_call: str
@@ -72,10 +73,12 @@ class ServiceConfig(_Model):
     dp_id: str
     name: str
     domain_pack: str
+    client_id: str = "default"
     approvers: dict[str, str]
     on_call: str
     budgets: dict[str, float]
     simulated: bool = False
+    stack_profile: Optional[dict[str, str]] = None
 
 
 class Monitor(_Model):

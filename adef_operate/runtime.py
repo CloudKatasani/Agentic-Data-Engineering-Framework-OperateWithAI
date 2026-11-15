@@ -14,9 +14,12 @@ from .engine.workspace import Workspace
 
 class OpsRuntime:
     def __init__(self, home: str | Path, adapter, *, simulated: bool = True,
-                 pager: Optional[OutboxPager] = None):
+                 pager: Optional[OutboxPager] = None, stack_profile: Optional[dict] = None,
+                 sandbox_factory=None):
         self.home = Path(home)
         self.adapter = adapter
+        self.stack_profile = stack_profile
+        self.sandbox_factory = sandbox_factory
         self.simulated = simulated
         self.pager = pager or OutboxPager()
 
@@ -24,9 +27,12 @@ class OpsRuntime:
         return Workspace(dp_id, self.home)
 
     def release(self, event: dict[str, Any]):
-        return CommanderAgent.accept(event, home=self.home, simulated=self.simulated)
+        return CommanderAgent.accept(event, home=self.home, simulated=self.simulated,
+                                     stack_profile=self.stack_profile)
 
     def onboard(self, dp_id: str):
+        if self.sandbox_factory:
+            return OnboardingAgent(self.workspace(dp_id), self.sandbox_factory).onboard()
         return OnboardingAgent(self.workspace(dp_id)).onboard()
 
     def tick(self, dp_id: str, at: Optional[datetime] = None) -> dict[str, Any]:

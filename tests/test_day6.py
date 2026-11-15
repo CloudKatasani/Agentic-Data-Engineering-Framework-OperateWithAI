@@ -129,8 +129,8 @@ def test_f03_one_group_not_one_per_downstream_table(t):
     assert len(out["signals"]) == 3 and len(out["groups"]) == 1
     g = out["groups"][0]
     labels = {s["object"]: g["labels"][s["id"]]["label"] for s in out["signals"]}
-    assert labels == {"raw.usage_records": "primary", "curated.usage_by_region": "downstream-echo",
-                      "mart.usage_daily": "downstream-echo"}
+    assert labels == {"bronze.usage_records": "primary", "silver.usage_by_region": "downstream-echo",
+                      "gold.usage_daily": "downstream-echo"}
     assert any(e["kind"] == "upstream_notice" for e in g["known_events"])
     assert len(out["outcomes"]) == 1 and out["outcomes"][0]["outcome"] == "opened"
 
@@ -183,7 +183,7 @@ def test_case_opening_cites_rule_sets_trust_and_pages(u):
     assert o["trust_status"] == "degraded"
     case = u.commander.cases.get(o["case"])
     assert case.state == "triaged" and case.owner == "adef-ops-incident-diagnosis"
-    assert case.first_failing_object == "raw.meter_interval_reads"
+    assert case.first_failing_object == "bronze.meter_interval_reads"
     assert u.rt.pager.sent[-1]["to"] == "Oncall Utilities"
     assert u.sim.state[u.dp]["trust_status"] == "degraded"
 
@@ -202,10 +202,10 @@ def test_domain_pack_raises_but_never_lowers(t):
     o = t.tick()["outcomes"][0]
     assert o["severity"] == "S2" and "raised by Domain Pack" in o["rule"]
     sd = t.ws.read_yaml("service/service-definition.yaml")
-    group = {"objects": ["mart.billing_summary"]}
-    sig = [{"signal_class": "quality", "object": "mart.billing_summary", "monitor_id": "x"}]
+    group = {"objects": ["gold.billing_summary"]}
+    sig = [{"signal_class": "quality", "object": "gold.billing_summary", "monitor_id": "x"}]
     lowering = {"severity_overrides": [{"match": {"object_tag": "billing"}, "min_severity": "S4"}]}
-    a = assess(group, sig, sd, lowering, {}, {"mart.billing_summary": ["billing"]})
+    a = assess(group, sig, sd, lowering, {}, {"gold.billing_summary": ["billing"]})
     assert a.severity == "S1" and a.override is None
 
 

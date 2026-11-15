@@ -1,12 +1,19 @@
 # Synthetic Utilities pack for the Demo Simulator. No vendor names; no real data.
 domain_pack:
   id: utilities
+  build_pack: {pack_id: utilities, pack_version: "0.1.0", source: "Build-With-AI skills/adef-stack-binding/assets/domain-pack.utilities.yaml"}
+  controls:
+    - {id: UTL-C1, text: "OT and IT data stay segregated; no agent tool has a path into operational networks.", checked_by: []}
+    - {id: UTL-C2, text: "Critical-infrastructure protected information is Restricted; metadata-only for agents; access changes need Security and Compliance.", checked_by: [grants, masking]}
+    - {id: UTL-C3, text: "Regulatory reporting datasets need full lineage and reproducible point-in-time results.", checked_by: []}
+    - {id: UTL-C4, text: "Customer usage data is shared outside the owning domain only aggregated or masked.", checked_by: [masking, grants]}
   severity_overrides:
     # A Domain Pack may raise a severity, never lower it.
     - match: {object_tag: regulated}
       min_severity: S2
       reason: Regulated operational dataset (settlement reads)
 handover_pack:
+  client_id: client-u
   dp_id: util_meter_daily
   name: Daily meter consumption
   domain_pack: utilities
@@ -22,43 +29,43 @@ handover_pack:
     tech_lead: Tia Lead
   on_call: Oncall Utilities
   objectives:
-    - {id: OBJ-1, kind: freshness, object: mart.daily_consumption, target: 120, unit: minutes, description: Loaded by 06:00 (lag under 2h)}
-    - {id: OBJ-2, kind: completeness, object: raw.meter_interval_reads, target: 25, unit: pct_band, description: Row count within 25% of weekday band}
-    - {id: OBJ-3, kind: completeness, object: raw.outage_events, target: 25, unit: pct_band}
+    - {id: OBJ-1, kind: freshness, object: gold.daily_consumption, target: 120, unit: minutes, description: Loaded by 06:00 (lag under 2h)}
+    - {id: OBJ-2, kind: completeness, object: bronze.meter_interval_reads, target: 25, unit: pct_band, description: Row count within 25% of weekday band}
+    - {id: OBJ-3, kind: completeness, object: bronze.outage_events, target: 25, unit: pct_band}
   pipelines:
     - id: meter_ingest
       owner: Oncall Utilities
       idempotent: true
       rollback_ref: runbook#meter-ingest-rollback
-      objects: [raw.meter_interval_reads, curated.meter_interval, mart.daily_consumption]
+      objects: [bronze.meter_interval_reads, silver.meter_interval, gold.daily_consumption]
       schedule: "daily 04:00"
     - id: outage_ingest
       owner: Oncall Utilities
       idempotent: true
       rollback_ref: runbook#outage-rollback
-      objects: [raw.outage_events, curated.outages]
+      objects: [bronze.outage_events, silver.outages]
       schedule: "hourly"
       quarantine_path: quarantine.outage_events
   quality_rules:
-    - {id: DQ-U1, object: curated.meter_interval, blocking: true, description: No negative interval reads}
+    - {id: DQ-U1, object: silver.meter_interval, blocking: true, description: No negative interval reads}
   consumers: [settlement-reporting, network-planning]
   lineage:
-    - [raw.meter_interval_reads, curated.meter_interval]
-    - [curated.meter_interval, mart.daily_consumption]
-    - [raw.outage_events, curated.outages]
+    - [bronze.meter_interval_reads, silver.meter_interval]
+    - [silver.meter_interval, gold.daily_consumption]
+    - [bronze.outage_events, silver.outages]
   cost_estimate_daily: 40.0
-  access_model: ["role:util_reader SELECT mart.daily_consumption", "role:util_etl ALL raw.*"]
+  access_model: ["role:util_reader SELECT gold.daily_consumption", "role:util_etl ALL bronze.*"]
   object_tags:
-    raw.meter_interval_reads: [regulated]
-    curated.meter_interval: [regulated]
-    mart.daily_consumption: [regulated]
+    bronze.meter_interval_reads: [regulated]
+    silver.meter_interval: [regulated]
+    gold.daily_consumption: [regulated]
   restricted_columns:
-    raw.meter_interval_reads: [meter_id]
+    bronze.meter_interval_reads: [meter_id]
   masking_policies:
-    raw.meter_interval_reads.meter_id: mask-hash-v1
+    bronze.meter_interval_reads.meter_id: mask-hash-v1
   retention_days:
-    raw.meter_interval_reads: 400
-    raw.outage_events: 400
+    bronze.meter_interval_reads: 400
+    bronze.outage_events: 400
   privileged_roles: [role:util_etl]
   schema_contract:
-    raw.meter_interval_reads: {meter_id: string, interval_start: timestamp, kwh: decimal}
+    bronze.meter_interval_reads: {meter_id: string, interval_start: timestamp, kwh: decimal}

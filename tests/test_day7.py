@@ -65,7 +65,7 @@ def test_diagnosis_writes_impact_evidence_and_moves_case(u):
 def test_recent_change_is_a_lead_not_a_conclusion(u):
     """A release on an object with no failing signal must not become 'code defect'."""
     case_id = incident(u, "F-01")
-    u.sim.state[u.dp]["releases"].append({"at": "2026-01-05T05:00:00+00:00", "object": "mart.daily_consumption",
+    u.sim.state[u.dp]["releases"].append({"at": "2026-01-05T05:00:00+00:00", "object": "gold.daily_consumption",
                                           "release": "R-x"})
     r = u.diagnosis.diagnose(case_id)
     assert r.cause_class == "upstream outage"
@@ -91,9 +91,9 @@ def test_ot05_restricted_raw_values_refused_and_escalated(u):
     case_id = incident(u, "F-05")
     reader = EvidenceReader(u.ws, u.sim, case_id)
     with pytest.raises(GuardViolation, match="statistics"):
-        reader.raw_values("raw.meter_interval_reads", "meter_id", reason="check negative reads")
+        reader.raw_values("bronze.meter_interval_reads", "meter_id", reason="check negative reads")
     assert any(e["to"] == "data_steward" for e in escalations(u.ws))
-    stats = reader.profile("raw.meter_interval_reads", "meter_id")
+    stats = reader.profile("bronze.meter_interval_reads", "meter_id")
     assert set(stats.data) == {"object", "column", "rows", "null_pct", "distinct_estimate"}
 
 

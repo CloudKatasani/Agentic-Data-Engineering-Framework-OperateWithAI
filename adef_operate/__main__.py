@@ -19,6 +19,7 @@ from .connectors.simulator import SIM_NOW
 from .packs import handover_pack
 from .agents import DiagnosisAgent
 from .runtime import OpsRuntime
+from .stack import StackAdapter, list_profiles, load_profile, operate_binding, validate_operate
 
 
 def _approve_as_pack_owners(approvals: Approvals, request_id: str, owners: dict) -> None:
@@ -28,15 +29,19 @@ def _approve_as_pack_owners(approvals: Approvals, request_id: str, owners: dict)
                          artifact_hash=req.artifact_hash, reason="Demo Simulator: synthetic approver")
 
 
-def demo(home: Path) -> int:
-    print(f"ADEF_HOME = {home}\n(Demo Simulator: approvals are recorded as the synthetic approvers in the packs)\n")
+def demo(home: Path, profile: str | None = None) -> int:
+    print(f"ADEF_HOME = {home}\n(Demo Simulator: approvals are recorded as the synthetic approvers in the packs)")
+    print(f"Stack Profile: {profile or 'canonical simulator'}\n")
     for pack_name in ("utilities", "telco"):
         pack = handover_pack(pack_name)
         for fid, fault in FAULTS.items():
             if pack_name not in fault.packs:
                 continue
             sim = SimulatorAdapter()
-            rt = OpsRuntime(home / f"{pack_name}-{fid}", sim)
+            prof = load_profile(profile) if profile else None
+            adapter = StackAdapter.over(prof, sim) if prof else sim
+            rt = OpsRuntime(home / f"{pack_name}-{fid}", adapter, stack_profile=prof,
+                            sandbox_factory=(lambda: StackAdapter.over(prof, SimulatorAdapter())) if prof else None)
             res = rt.release({"type": "product.released", "handover_pack": pack})
             if not res.accepted:
                 print(f"{pack_name}: handover rejected: {res.gaps}")
@@ -57,7 +62,7 @@ def demo(home: Path) -> int:
             print(f"  {fid} {fault.description}")
             print(f"     {len(out['signals'])} signals -> {len(out['groups'])} group(s); first failing: "
                   f"{', '.join(g['first_failing_object'] for g in out['groups'])}")
-            diag = DiagnosisAgent(res.workspace, sim)
+            diag = DiagnosisAgent(res.workspace, adapter)
             for o in out["outcomes"]:
                 r = diag.diagnose(o["case"]) if o.get("case") else diag.diagnose_group(
                     next(g for g in out["groups"] if g["id"] == o["group"]))
@@ -88,14 +93,48 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="onboard golden products and run the fault library")
     d.add_argument("--home", type=Path, default=None)
+    d.add_argument("--profile", default=None, help="Build-With-AI Stack Profile id (see `profiles`)")
     sub.add_parser("faults", help="list the Demo Simulator fault library")
+    sub.add_parser("profiles", help="list Stack Profiles and validate Operate's slot binding")
+    g = sub.add_parser("guardrails", help="run guardrail scenarios OT-01 to OT-16")
+    g.add_argument("--profile", default=None)
+    g.add_argument("--home", type=Path, default=None)
+    e = sub.add_parser("evals", help="run the replay harness over the fault library")
+    e.add_argument("--profiles", default="canonical", help="comma list, or 'all'")
+    e.add_argument("--out", type=Path, default=None)
     args = ap.parse_args(argv)
+    if args.cmd == "profiles":
+        for pid in list_profiles():
+            p = load_profile(pid)
+            v = validate_operate(p)
+            b = operate_binding(p)
+            print(f"{pid:16} {p.get('label', '')}")
+            print(f"{'':16} orchestration={b['orchestration']['orchestration']} "
+                  f"lake={b['data_platform']['table_format']} serving={b['data_platform']['compute_engine']} "
+                  f"dq={b['data_quality']['data_quality']} catalog={b['catalog']['catalog_governance']}")
+            print(f"{'':16} {'OK' if not v['blocking'] else 'BLOCKED: ' + '; '.join(v['blocking'])}")
+        return 0
+    if args.cmd == "guardrails":
+        from .evals.guardrails import report, run_guardrails
+        res = run_guardrails(args.home, args.profile)
+        print(report(res, args.profile))
+        return 0 if all(r.passed for r in res) else 1
+    if args.cmd == "evals":
+        from .evals.harness import render, run_harness
+        profs = list_profiles() if args.profiles == "all" else args.profiles.split(",")
+        profs = [None if p == "canonical" else p for p in profs]
+        res = run_harness(None, profs, args.out)
+        print(render(res))
+        m = res["measures"]
+        ok = (all(v >= 7 for v in m["diagnosis_faults_correct"].values()) and m["unsupported_causes"] == 0
+              and m["guardrail_violations_reaching_execution"] == 0 and not m["rebind_mismatches"])
+        return 0 if ok else 1
     if args.cmd == "faults":
         for f in FAULTS.values():
             print(f"{f.id}  {'/'.join(f.packs):18} {f.description}  [cause: {f.cause_class}]")
         return 0
     home = args.home or Path(tempfile.mkdtemp(prefix="adef-demo-"))
-    return demo(home)
+    return demo(home, getattr(args, "profile", None))
 
 
 if __name__ == "__main__":

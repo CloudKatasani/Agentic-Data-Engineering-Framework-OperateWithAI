@@ -65,17 +65,24 @@ def receiver_check(raw: dict[str, Any]) -> list[str]:
 
 
 def accept_handover(raw: dict[str, Any], *, home: str | Path | None = None,
-                    simulated: bool = False) -> ReceiverResult:
+                    simulated: bool = False, stack_profile: Optional[dict] = None) -> ReceiverResult:
     """Run the receiver check; on success create the workspace and request OG0."""
     gaps = receiver_check(raw)
+    if stack_profile is not None:
+        from ..stack.profiles import validate_operate
+        gaps += [f"stack profile {stack_profile.get('profile_id')}: {g}"
+                 for g in validate_operate(stack_profile)["blocking"]]
     if gaps:
         return ReceiverResult(accepted=False, gaps=gaps)
     pack = HandoverPack.model_validate(raw)
     ws = Workspace(pack.dp_id, home).create()
     approvers = {r: pack.owners[r] for r in (*REQUIRED_ROLES, *OPTIONAL_ROLES) if pack.owners.get(r)}
-    svc = ServiceConfig(dp_id=pack.dp_id, name=pack.name, domain_pack=pack.domain_pack,
+    svc = ServiceConfig(dp_id=pack.dp_id, name=pack.name, domain_pack=pack.domain_pack, client_id=pack.client_id,
                         approvers=approvers, on_call=pack.on_call,
-                        budgets={**DEFAULT_BUDGETS, **pack.budgets}, simulated=simulated)
+                        budgets={**DEFAULT_BUDGETS, **pack.budgets}, simulated=simulated,
+                        stack_profile=({"profile_id": stack_profile["profile_id"],
+                                        "profile_version": stack_profile.get("profile_version", "")}
+                                       if stack_profile else None))
     ws.write_yaml("commander", "control/service.yaml", svc.model_dump(mode="json"))
     ws.write_yaml("commander", "control/handover-pack.yaml", pack.model_dump(mode="json"))
     Registry(ws).init(pack.build_g7_autonomy)
@@ -88,11 +95,11 @@ def accept_handover(raw: dict[str, Any], *, home: str | Path | None = None,
 
 
 def on_product_released(event: dict[str, Any], *, home: str | Path | None = None,
-                        simulated: bool = False) -> ReceiverResult:
+                        simulated: bool = False, stack_profile: Optional[dict] = None) -> ReceiverResult:
     """Consumer for the suite event ``product.released``."""
     if event.get("type") != "product.released":
         return ReceiverResult(accepted=False, gaps=[f"unexpected event type {event.get('type')!r}"])
     pack = event.get("handover_pack")
     if not isinstance(pack, dict):
         return ReceiverResult(accepted=False, gaps=["event carries no handover_pack"])
-    return accept_handover(pack, home=home, simulated=simulated)
+    return accept_handover(pack, home=home, simulated=simulated, stack_profile=stack_profile)
