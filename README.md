@@ -5,6 +5,32 @@ quality, cost and compliance targets. The specification is [`OPERATE_SPEC.md`](O
 the eight agent contracts are in [`skills/`](skills/) (unpacked from
 `operate-with-ai-skills.zip`).
 
+## How it works: agents do the work, people decide
+
+Eight AI agents run operations around the clock and bring people in at every decision. See
+[`OPERATING_MODEL.md`](OPERATING_MODEL.md) for each agent's role, responsibilities and limits, the
+human roles, and the full "who is notified, for what, by when" matrix.
+
+| Agents do on their own | People decide (notified in their inbox, with one-click actions) |
+|---|---|
+| Detect (monitors), group signals, open one case per cause, set severity by rule | **On-call:** acknowledge and own the incident (S1 15 min, S2 30 min) |
+| Diagnose with evidence and hypotheses | **Council of three** (S1 only): agree with the diagnosis before fixes are offered |
+| Propose fixes ranked by safety and recommend one | **Approver:** choose the fix; choosing records the approval at the gate |
+| Execute only what a person approved (or a standing L3 approval allows, with a notice) | **On-call:** run fixes that are executed by people, then "I ran it" |
+| Verify recovery with the detecting monitors; contain first without counting an attempt | **Service owner:** confirm the cause, review the post-incident note, close |
+| Draft the post-incident note, open problems, propose control and autonomy changes | **Platform owner and tech lead:** OG7 proposals; **Security:** OG5 and security escalations |
+
+Unanswered asks escalate to the next role when their response time passes. The console's
+home page is each person's inbox; the "Agent team and roles" page shows what every agent owns and
+is doing now. With `--autotick`, the loop runs continuously:
+
+```bash
+./run.sh --demo --profile example-a --autotick 30
+```
+
+Set `ADEF_NOTIFY_WEBHOOK` to a Slack-compatible incoming webhook to also push every ask
+that needs action.
+
 **Detection is code and judgement is agents.** The deterministic runtime enforces the
 guardrails in spec section 8 outside the prompts. All eight agents are built: Commander, Service Onboarding, Signal Sentinel, Incident
 Diagnosis, Remediation, FinOps and Performance, Governance and Compliance, and Problem
@@ -47,6 +73,9 @@ Then open http://127.0.0.1:8090/. The console has these views:
 
 | View | What it shows |
 |---|---|
+| My inbox (home) | Everything the agents need from you: acknowledge, review, choose a fix, approve, run, confirm, close. Each shows the asking agent, priority and response time. |
+| Agent team and roles | Each agent's role, responsibilities, limits and when it brings a person in, with live work; the human roles and who holds them; how an incident moves between AI and people. |
+| Activity | Every agent action and every human decision across the fleet. |
 | Fleet health | Every product: mode, trust status, open cases by severity, findings, OG1, today's budgets, items waiting on a person. Includes the emergency stop. |
 | Case room | Lifecycle, timeline, impact, signals with Sentinel labels, metadata-only evidence, hypotheses with for and against, options ranked by safety, approvals, council of three, verification, confirmed cause, post-incident note. |
 | Service page | Autonomy ladder (stored against effective level, with the reason and track record), monitors, runbook, readiness, health summary, stack binding, escalations, the Demo Simulator controls, and "Ask the Commander". |

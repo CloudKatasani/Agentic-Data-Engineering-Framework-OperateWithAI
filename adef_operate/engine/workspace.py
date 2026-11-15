@@ -29,7 +29,7 @@ FOLDERS = [
 AGENTS = ("commander", "onboarding", "sentinel", "diagnosis", "remediation",
           "finops", "governance", "knowledge")
 CODE = ("collector", "monitor_engine", "case_store", "executor", "approvals", "registry",
-        "escalations", "council", "shadow")
+        "escalations", "council", "shadow", "notifier")
 
 ALLOW: dict[str, list[str]] = {
     "commander": ["cases/*/case.yaml", "cases/*/notice-draft.md", "health/**",
@@ -56,6 +56,7 @@ ALLOW: dict[str, list[str]] = {
     "escalations": ["control/escalations.jsonl"],
     "council": ["cases/*/council.yaml"],
     "shadow": ["shadow/**"],
+    "notifier": ["control/notifications.jsonl"],
 }
 
 DENY: dict[str, list[str]] = {

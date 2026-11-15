@@ -186,10 +186,17 @@ class RemediationAgent:
                                "Reversible", "revoke_access", approval="OG5 (security_compliance); executed by people",
                                executed_by_people=True))
 
+        done = self.executed_action_types(case_id)
+        opts = [o for o in opts if not (o.kind == "contain" and o.action_type in done)]  # contained already
         opts.sort(key=lambda o: SAFETY_ORDER.index(o.kind))
         for i, o in enumerate(opts, start=1):
             o.no = i
-        rec = next((o for o in opts if o.kind == "contain"), None) or next(
+        # Recommend: contain first; then the step that removes the cause. For a code defect that is
+        # the rollback (fastest safe restore) or the code fix; a backfill only makes sense after it.
+        prefer = {"code defect": ["contain", "rollback", "code-fix", "catalogue"],
+                  "source data": ["contain", "code-fix", "catalogue", "data-correction"]}.get(
+            cause, ["contain", "wait", "catalogue", "configuration", "code-fix", "rollback"])
+        rec = next((o for k in prefer for o in opts if o.kind == k and "after the fix" not in o.title), None) or next(
             (o for o in opts if o.kind not in ("trade-off",)), None)
         if rec:
             rec.recommended = True
@@ -198,6 +205,15 @@ class RemediationAgent:
             self.cases.transition(case_id, "options-ready", by=self.identity,
                                   note=f"{len(opts)} options; recommended #{rec.no if rec else '-'}")
         return opts
+
+    def executed_action_types(self, case_id: str) -> set[str]:
+        root = self.ws.path(f"cases/{case_id}/actions")
+        out = set()
+        for p in root.glob("ACT-*.yaml") if root.exists() else []:
+            d = self.ws.read_yaml(f"cases/{case_id}/actions/{p.name}") or {}
+            if d.get("status") in ("executed", "executed-by-people", "verified", "failed-verification"):
+                out.add(d["record"]["action_type"])
+        return out
 
     def _evidence(self, case_id: str, kind: str) -> list[dict]:
         root = self.ws.path(f"cases/{case_id}/evidence")

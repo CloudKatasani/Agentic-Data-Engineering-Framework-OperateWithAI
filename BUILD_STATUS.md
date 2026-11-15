@@ -309,6 +309,33 @@ are not available in this environment.
   - configuration;
   - a real SDK client failing cleanly with no reachable API.
 
+## Human-in-the-loop operating model (product review)
+
+A product review found the agents invisible, nobody notified, nothing running without
+clicks, and human decisions not connected into a flow. Fixed:
+
+- **Agent team** (`agents/team.py`, `OPERATING_MODEL.md`). Eight agent cards (mission, responsibilities, triggers, outputs, what each never does, and exactly when each brings in a person), nine human roles with what each decides, and the AI/human incident flow. The document is generated from the code and a test keeps them in sync.
+- **Notifications** (`engine/notifications.py`).
+  - **Target:** each one goes to a role and the named holder (or each council member), asks for specific actions, and carries a response time by priority.
+  - **Rules:** one open ask per decision and person. Only named people resolve them; dismissing needs a reason.
+  - **Deadlines:** missed ones escalate to the next role.
+  - **Delivery and audit:** the console inbox always; a Slack-compatible webhook for asks that need action. Hash-chained log. In shadow mode, asks are labelled and never sent.
+- **Operating loop** (`engine/ops_loop.py`). After each tick, agents diagnose new cases and build options on their own. The council of three reviews S1 diagnoses before fixes are offered, and the approver chooses the fix (choosing approves it when they hold the gate). Then:
+  - on-call runs L1 fixes and confirms;
+  - recovery is verified straight away, or on the next check;
+  - containment is not counted as a failed attempt and is not offered again;
+  - the service owner confirms the cause and closes.
+
+  Pending gate requests and escalations are routed to their people, and nothing executes without a person except earned L3 standing approval, which notifies the owner.
+- **Recommendation judgement.** For a code defect: contain, then roll back or fix, and only then backfill.
+- **Console.**
+  - "My inbox" is the home page, with a "You are" picker.
+  - "Agent team and roles" shows each agent with live stats.
+  - "Activity" shows AI and human actions across the fleet.
+  - The case room has a "waiting on people" banner with inline actions.
+- **Scheduler.** `serve --autotick N` runs monitors, agents and deadline checks continuously.
+- **Tests.** `tests/test_hitl.py`: the S2 and S1 flows driven only by notification actions, people-only actions, deadline escalation, webhook delivery, standing approval, the approval and escalation sweeps, API with personal tokens, and the scheduler. The flows were also driven in Chromium as the named people.
+
 ## Assumptions made during the build (please confirm)
 
 | # | Assumption | Where |

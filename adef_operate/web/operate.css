@@ -35,3 +35,19 @@
 .hyp-refuted { color: var(--bad); }
 .hyp-unsupported, .hyp-inconclusive { color: var(--muted); }
 .desk { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+
+/* human-in-the-loop */
+.ntf { border-left: 5px solid var(--info); }
+.ntf.k-decide, .ntf.k-run { border-left-color: var(--warn); }
+.ntf.k-escalation { border-left-color: var(--bad); }
+.ntf.k-fyi { border-left-color: var(--border); }
+.ntf.k-review { border-left-color: var(--violet); }
+.ntf.done { opacity: .7; border-left-color: var(--ok); }
+.ntf + .ntf { margin-top: 10px; }
+.ntf .opts { flex-basis: 100%; }
+.ntf .opts .chk { margin-top: 4px; }
+.flowline { display: grid; grid-template-columns: repeat(12, minmax(110px, 1fr)); gap: 6px; min-width: 1320px; }
+.fstep { border: 1px solid var(--border); border-radius: 9px; padding: 8px; background: var(--panel); border-top: 3px solid var(--info); font-size: 12.5px; }
+.fstep.human { border-top-color: var(--warn); background: var(--warn-bg); }
+.fstep.both { border-top-color: var(--violet); }
+.agent-card p { line-height: 1.45; }

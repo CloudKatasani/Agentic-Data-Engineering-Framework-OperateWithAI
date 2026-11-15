@@ -52,9 +52,29 @@ def _identities() -> dict[str, str]:
     return {str(k): str(v) for k, v in (yaml.safe_load(Path(path).read_text()) or {}).items()}
 
 
-def create_app(home: Optional[str | Path] = None) -> FastAPI:
+def create_app(home: Optional[str | Path] = None, autotick: Optional[float] = None) -> FastAPI:
+    import threading
+    from contextlib import asynccontextmanager
     fleet = Fleet(home or adef_home())
-    app = FastAPI(title="DataCrew- OperateWithAI - Operate-With-AI API", version=__version__)
+    stop_event = threading.Event()
+
+    def scheduler():
+        while not stop_event.wait(autotick):
+            try:
+                fleet.run_all()
+            except Exception:  # the scheduler never dies on one bad cycle; the next cycle retries
+                pass
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        t = None
+        if autotick:
+            t = threading.Thread(target=scheduler, name="operate-scheduler", daemon=True)
+            t.start()
+        yield
+        stop_event.set()
+
+    app = FastAPI(title="DataCrew- OperateWithAI - Operate-With-AI API", version=__version__, lifespan=lifespan)
     app.state.fleet = fleet
     token = os.environ.get("ADEF_API_TOKEN", "")
 
@@ -218,6 +238,43 @@ def create_app(home: Optional[str | Path] = None) -> FastAPI:
     def decide(dp: str, request_id: str, request: Request, body: dict = Body(...)):
         return fleet.decide(dp, request_id, approver=as_person(request, body.get("approver")), role=body["role"],
                             decision=body["decision"], reason=body.get("reason", ""))
+
+    # -- human-in-the-loop: notifications, team, activity -------------------------------------------
+    @app.get("/ops/notifications")
+    def notifications(person: Optional[str] = None, status: str = "open", dp: Optional[str] = None):
+        return fleet.notifications(person=person, status=status, dp=dp)
+
+    def _params(body: dict) -> dict:
+        out = {k: body[k] for k in ("option", "cause_class", "act_id", "role", "note", "request_id") if body.get(k) is not None}
+        if "option" in out:
+            out["option"] = int(out["option"])
+        return out
+
+    @app.post("/ops/notifications/{dp}/{nid}/actions")
+    def notification_action(dp: str, nid: str, request: Request, body: dict = Body(...)):
+        return fleet.notification_action(dp, nid, body["action"], as_person(request, body.get("by")), **_params(body))
+
+    @app.post("/ops/cases/{case_id}/actions")
+    def case_action(case_id: str, request: Request, body: dict = Body(...), dp: Optional[str] = None):
+        dp = fleet.resolve_case(case_id, dp or body.get("dp"))
+        return fleet.case_action(dp, case_id, body["action"], as_person(request, body.get("by")), **_params(body))
+
+    @app.get("/ops/team")
+    def team():
+        return fleet.team()
+
+    @app.get("/ops/people")
+    def people():
+        return fleet.people()
+
+    @app.get("/ops/activity")
+    def activity(dp: Optional[str] = None, limit: int = 150):
+        return fleet.activity(dp, limit)
+
+    @app.post("/ops/run")
+    def run_cycle():
+        """One scheduled cycle across the fleet (what the background scheduler does)."""
+        return fleet.run_all()
 
     # -- simulator -------------------------------------------------------------------------------
     @app.post("/ops/simulate/faults")

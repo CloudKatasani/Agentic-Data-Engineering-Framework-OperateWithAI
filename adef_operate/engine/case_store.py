@@ -35,7 +35,7 @@ TRANSITIONS: dict[str, dict[str, set[str]]] = {
         "diagnosing": {"options-ready"},
         "options-ready": {"awaiting-approval", "executing", "verifying"},
         "awaiting-approval": {"executing", "options-ready"},
-        "executing": {"verifying"},
+        "executing": {"verifying", "options-ready"},  # options-ready: containment done, choose the fix
         "verifying": {"recovered", "failed"},
         "failed": {"options-ready", "diagnosing"},
         "recovered": {"reviewed"},

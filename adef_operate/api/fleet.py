@@ -27,6 +27,8 @@ from ..engine.catalogue import DEFAULT_CATALOGUE, lookup
 from ..engine.council import Council
 from ..engine.escalation import escalations
 from ..engine.monitor_engine import ingest_signal
+from ..engine.notifications import Notifier
+from ..engine.ops_loop import OpsLoop
 from ..engine.registry import Registry, global_stop_path
 from ..engine.workspace import Workspace
 from ..packs import PACKS, handover_pack
@@ -179,12 +181,16 @@ class Fleet:
             if svc.get("mode", "demo") == "demo":
                 n = self._bump_ticks(dp)
                 at = SIM_NOW + timedelta(minutes=5 * (n - 1))
-                out = OpsRuntime(self.home, self.adapter(dp), pager=self.pager).tick(dp, at)
+                adapter = self.adapter(dp)
+                out = OpsRuntime(self.home, adapter, pager=self.pager).tick(dp, at)
+                loop = OpsLoop(self.ws(dp), adapter).after_tick(out) if self.ws(dp).has("service/monitoring-spec.yaml") else {}
                 self._save_sim(dp)
                 return {"at": at.isoformat(), "signals": len(out["signals"]), "groups": out["groups"],
-                        "outcomes": out["outcomes"]}
+                        "outcomes": out["outcomes"], "loop": loop}
             start = self.ws(dp).read_yaml("shadow/start.yaml")
             runs = ShadowRuntime(self.home, start["profile_id"], start["exports"]).run_new_snapshots(dp)
+            for r in runs:
+                OpsLoop(self.ws(dp), self.adapter(dp)).after_tick(r)
             return {"snapshots": len(runs), "opened": [c for r in runs for c in r["cases_opened"]],
                     "recovered": [c for r in runs for c in r["recovered"]]}
 
@@ -399,25 +405,14 @@ class Fleet:
     # -- approvals ------------------------------------------------------------------------------
     def decide(self, dp: str, request_id: str, *, approver: str, role: str, decision: str,
                reason: str = "") -> dict:
+        """A person decides a gate request; the loop then brings in the next agent or person."""
         with self.lock:
-            ws = self.ws(dp)
-            a = Approvals(ws)
-            req = a.get_request(request_id)
-            a.decide(request_id, approver=approver, role=role, decision=decision, artifact_hash=req.artifact_hash,
-                     reason=reason)
-            status = a.status(request_id)
-            follow: dict[str, Any] = {}
-            if status in ("approved", "rejected") and req.case_id:
-                adapter = self.adapter(dp)
-                act_dir = ws.path(f"cases/{req.case_id}/actions")
-                for p in sorted(act_dir.glob("ACT-*.yaml")) if act_dir.exists() else []:
-                    d = ws.read_yaml(f"cases/{req.case_id}/actions/{p.name}")
-                    if d.get("approval_id") == request_id and d.get("status") == "awaiting-approval":
-                        follow = RemediationAgent(ws, adapter).proceed(req.case_id, p.stem)
-                if req.case_id.startswith("FIN-"):
-                    follow = {"decision": FinOpsAgent(ws, adapter).record_decision(req.case_id, request_id)}
+            out = OpsLoop(self.ws(dp), self.adapter(dp)).act(
+                "approve" if decision == "approved" else "reject", by=approver, request_id=request_id, role=role,
+                note=reason)
             self._save_sim(dp)
-            return {"request": request_id, "gate": req.gate, "status": status, "follow_up": follow}
+            return {"request": out["request"], "gate": out["gate"], "status": out["status"],
+                    "follow_up": out.get("follow_up", {})}
 
     def confirm_people_executed(self, dp: str, case_id: str, act_id: str, by: str) -> dict:
         with self.lock:
@@ -523,6 +518,120 @@ class Fleet:
     def request(self, dp: str, text: str, by: str) -> dict:
         with self.lock:
             return RequestDesk(self.ws(dp)).handle(text, by=by)
+
+    # -- notifications, team and activity ---------------------------------------------------------
+    def notifications(self, *, person: Optional[str] = None, status: str = "open", dp: Optional[str] = None) -> list[dict]:
+        out = []
+        for d in ([dp] if dp else self.products()):
+            for n in Notifier(self.ws(d)).all():
+                if status == "open" and n["status"] not in ("open", "acknowledged"):
+                    continue
+                if person and n["to_person"] != person:
+                    continue
+                out.append(n)
+        prio = {"P1": 0, "P2": 1, "P3": 2, "P4": 3}
+        return sorted(out, key=lambda n: (n["status"] not in ("open", "acknowledged"), prio.get(n["priority"], 9),
+                                          n["created_at"]))
+
+    def notification_action(self, dp: str, nid: str, action: str, by: str, **params) -> dict:
+        with self.lock:
+            out = OpsLoop(self.ws(dp), self.adapter(dp)).act(action, by=by, notification_id=nid, **params)
+            self._save_sim(dp)
+            return out
+
+    def case_action(self, dp: str, case_id: str, action: str, by: str, **params) -> dict:
+        with self.lock:
+            out = OpsLoop(self.ws(dp), self.adapter(dp)).act(action, by=by, case_id=case_id, **params)
+            self._save_sim(dp)
+            return out
+
+    def people(self) -> list[dict]:
+        from ..agents.team import HUMAN_ROLES
+        people: dict[str, dict] = {}
+        for d in self.products():
+            svc = self.svc(d)
+            holders = {**(svc.get("approvers") or {}), "on_call": svc.get("on_call")}
+            for role, name in holders.items():
+                if not name:
+                    continue
+                p = people.setdefault(name, {"name": name, "roles": [], "open": 0})
+                p["roles"].append({"product": d, "role": role})
+        for n in self.notifications():
+            if n["to_person"] in people:
+                people[n["to_person"]]["open"] += 1
+        return sorted(people.values(), key=lambda p: (-p["open"], p["name"]))
+
+    def team(self) -> dict:
+        from ..agents.team import AGENTS, FLOW, HUMAN_ROLES
+        stats = {a["id"]: {"events": 0, "last": None, "open_items": 0, "notifications": 0} for a in AGENTS}
+        for d in self.products():
+            ws = self.ws(d)
+            for c in CaseStore(ws).all():
+                for t in c.timeline:
+                    if t.by in stats:
+                        s = stats[t.by]
+                        s["events"] += 1
+                        if not s["last"] or t.at.isoformat() > s["last"]["at"]:
+                            s["last"] = {"at": t.at.isoformat(), "product": d, "case": c.id, "event": t.event}
+                if c.state == "closed":
+                    continue
+                owner = {"INC": {"triaged": "diagnosis", "diagnosing": "diagnosis", "options-ready": "remediation",
+                                 "awaiting-approval": "remediation", "executing": "remediation",
+                                 "verifying": "remediation", "recovered": "knowledge", "reviewed": "knowledge",
+                                 "failed": "remediation", "detected": "commander"}.get(c.state),
+                         "FIN": "finops", "GOV": "governance", "PRB": "knowledge", "CHG": "remediation"}[c.type]
+                if owner:
+                    stats[owner]["open_items"] += 1
+            for n in Notifier(ws).all():
+                if n["from_agent"] in stats:
+                    stats[n["from_agent"]]["notifications"] += 1
+            if not ws.has("service/monitoring-spec.yaml"):
+                stats["onboarding"]["open_items"] += 1
+            for g in ws.path("signals/groups").glob("*.jsonl") if ws.path("signals/groups").exists() else []:
+                stats["sentinel"]["events"] += len(g.read_text().splitlines())
+        pending = {}
+        for n in self.notifications():
+            pending[n["to_role"]] = pending.get(n["to_role"], 0) + 1
+        roles = [{**r, "holders": sorted({(self.svc(d).get("approvers") or {}).get(r["role"]) or
+                                          (self.svc(d).get("on_call") if r["role"] == "on_call" else None)
+                                          for d in self.products()} - {None}),
+                  "open": pending.get(r["role"], 0)} for r in HUMAN_ROLES]
+        return {"agents": [{**a, "stats": stats[a["id"]]} for a in AGENTS], "roles": roles, "flow": FLOW,
+                "council_open": pending.get("council", 0)}
+
+    def activity(self, dp: Optional[str] = None, limit: int = 150) -> list[dict]:
+        from ..agents.team import agent_ids
+        ai = agent_ids() | {"executor", "monitor_engine", "case_store", "registry", "notifier", "council", "approvals"}
+        items = []
+        for d in ([dp] if dp else self.products()):
+            ws = self.ws(d)
+            for c in CaseStore(ws).all():
+                for t in c.timeline:
+                    items.append({"at": t.at.isoformat(), "product": d, "case": c.id, "actor": t.by,
+                                  "kind": "ai" if t.by in ai else "human", "text": t.event})
+            for n in Notifier(ws).all():
+                items.append({"at": n["created_at"], "product": d, "case": n["case_id"], "actor": n["from_agent"],
+                              "kind": "ai", "text": f"notified {n['to_person']} ({n['to_role'].replace('_', ' ')}): {n['title']}"})
+                for h in n["history"]:
+                    if h["by"] and h["by"] not in ai and h["by"] != "system":
+                        items.append({"at": h["at"], "product": d, "case": n["case_id"], "actor": h["by"],
+                                      "kind": "human", "text": f"{h['event']} {n['id']}: {h.get('note') or ''}"})
+        return sorted(items, key=lambda x: x["at"], reverse=True)[:limit]
+
+    def run_all(self) -> dict:
+        """One scheduled cycle: tick every onboarded product, then check response deadlines."""
+        out = {}
+        for d in self.products():
+            ws = self.ws(d)
+            if not ws.has("service/monitoring-spec.yaml") or Registry(ws).stop_state():
+                if ws.has("service/monitoring-spec.yaml"):
+                    Notifier(ws).check_deadlines()
+                continue
+            try:
+                out[d] = {k: v for k, v in self.tick(d).items() if k in ("signals", "loop", "snapshots")}
+            except AdefError as exc:
+                out[d] = {"error": str(exc)}
+        return out
 
     # -- catalogue for the console ---------------------------------------------------------------
     @staticmethod

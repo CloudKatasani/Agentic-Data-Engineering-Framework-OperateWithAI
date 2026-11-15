@@ -6,7 +6,7 @@
   <title>DataCrew- OperateWithAI Console</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2313804b'/><path d='M6 17 h6 l3 -7 l4 13 l3 -6 h4' fill='none' stroke='white' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/></svg>">
   <link rel="stylesheet" href="/static/styles.css?v=1.0.0">
-  <link rel="stylesheet" href="/static/operate.css?v=1.0.0">
+  <link rel="stylesheet" href="/static/operate.css?v=1.1.0">
 </head>
 <body>
   <div class="shell">
@@ -16,10 +16,14 @@
         <div><div class="brand-name" id="brandName">DataCrew- OperateWithAI</div><div class="brand-sub" id="brandSub">Agentic Data Operations</div></div>
       </div>
       <nav id="nav">
+        <div style="padding:2px 6px 8px"><label style="margin:0 0 4px">You are</label><select id="personPick" aria-label="You are"></select></div>
         <div class="nav-group">Operations</div>
+        <a href="#/inbox" data-route="inbox">My inbox <span id="inboxCount"></span></a>
         <a href="#/fleet" data-route="fleet">Fleet health</a>
         <a href="#/cases" data-route="cases">Case queue</a>
         <a href="#/approvals" data-route="approvals">Approvals <span id="apprCount"></span></a>
+        <a href="#/team" data-route="team">Agent team and roles</a>
+        <a href="#/activity" data-route="activity">Activity</a>
         <div class="nav-group">Product</div>
         <div style="padding:2px 6px 6px"><select id="productPick" aria-label="Product"></select></div>
         <a href="#/service" data-route="service">Service page</a>
@@ -38,6 +42,7 @@
   </div>
   <div id="toast"></div>
   <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div></div></div>
-  <script src="/static/app.js?v=1.0.0"></script>
+  <script src="/static/app.js?v=1.1.0"></script>
+  <script src="/static/team.js?v=1.1.0"></script>
 </body>
 </html>

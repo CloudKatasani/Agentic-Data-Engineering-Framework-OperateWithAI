@@ -105,10 +105,10 @@ const routes = {};
 const route = (name, fn) => { routes[name] = fn; };
 const product = () => store.get("op_product", "") || (FLEET?.products[0]?.dp_id ?? "");
 async function navigate() {
-  const [, name = "fleet", ...args] = location.hash.split("/");
+  const [, name = "inbox", ...args] = location.hash.split("/");
   $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === (name === "case" ? "cases" : name)));
   main().innerHTML = '<div class="loading">Loading…</div>';
-  try { await (routes[name] || routes.fleet)(...args.map(decodeURIComponent)); }
+  try { await (routes[name] || routes.inbox)(...args.map(decodeURIComponent)); }
   catch (e) { main().innerHTML = `<div class="card"><div class="notice bad">${esc(e.message)}</div></div>`; }
   refreshCounts();
 }
@@ -125,7 +125,13 @@ async function refreshFleet() {
 }
 async function refreshCounts() {
   try { const a = await api("GET", "/approvals"); $("#apprCount").innerHTML = a.length ? badge("", a.length, "b-warn") : ""; } catch { /* ignore */ }
+  try {
+    const me = WHO?.person || store.get("op_person", "");
+    const n = await api("GET", `/notifications${me ? `?person=${encodeURIComponent(me)}` : ""}`);
+    $("#inboxCount").innerHTML = n.length ? badge("", n.length, n.some((x) => x.priority === "P1") ? "b-bad" : "b-warn") : "";
+  } catch { /* ignore */ }
 }
+$("#personPick").addEventListener("change", (e) => { store.set("op_person", e.target.value); navigate(); });
 $("#productPick").addEventListener("change", (e) => {
   store.set("op_product", e.target.value);
   const [, name] = location.hash.split("/");
@@ -221,8 +227,9 @@ route("case", async (dp, id) => {
     <div class="spread"><div><div class="small muted"><a href="#/cases">Case queue</a> / ${esc(dp)}</div>
       <h1>${esc(c.id)} ${sev(c.severity)} ${c.trust_status ? trust(c.trust_status) : ""} ${c.escalated ? badge("", "escalated", "b-bad") : ""}</h1>
       <div class="sub">${esc(c.severity_rule || c.timeline[0]?.event || "")}${c.severity_would_lower ? `<br><span class="small">Would lower: ${esc(c.severity_would_lower)}</span>` : ""}</div></div>
-      <div class="row">${c.type === "INC" ? ["diagnose", "options", "verify", "post-incident", "close"].map((s) => `<button class="btn small" data-step="${s}">${s.replace("-", " ")}</button>`).join("") : ""}</div></div>
+      <div class="row">${c.type === "INC" ? `<span class="small muted">Run a step now:</span>` + ["diagnose", "options", "verify", "post-incident", "close"].map((s) => `<button class="btn small ghost" data-step="${s}">${s.replace("-", " ")}</button>`).join("") : ""}</div></div>
     ${shadowNote}${life}
+    <div id="waiting"></div>
     ${c.next_action ? `<div class="now ai"><div><b>Next:</b> ${esc(c.next_action)}<div class="small">Owner: ${esc(agentShort(c.owner) || "-")} · First failing object: ${esc(c.first_failing_object || "-")} · Failed attempts: ${c.failed_attempts}</div></div></div>` : ""}
     ${c.open_questions.length ? `<div class="notice warn" style="margin-bottom:14px">${c.open_questions.map(esc).join("<br>")}</div>` : ""}
     <div class="tabs">${[["overview", "Timeline and impact"], ["diagnosis", "Diagnosis and evidence"], ["options", "Options"], ["approvals", `Approvals (${d.approvals.filter((a) => a.status === "pending").length})`], ["learning", "Verification and learning"]]
@@ -266,7 +273,11 @@ route("case", async (dp, id) => {
       <div class="card"><h2>Post-incident note</h2>${md(d.post_incident)}</div>`,
   };
   $("#tabBody").innerHTML = (body[tab] || body.overview)();
+  $("#waiting").innerHTML = await caseWaitingBanner(dp, id);
+  if ($("#waiting [data-ntf]")) $$(".now.ai").forEach((el) => { el.style.display = "none"; });
+  fillOptions($("#waiting"));
   main().onclick = async (e) => {
+    if (await handleNotificationClick(e, () => navigate())) return;
     const t = e.target.closest("[data-tab]");
     if (t) { store.set("op_case_tab", t.dataset.tab); return navigate(); }
     const s = e.target.closest("[data-step]")?.dataset.step;
@@ -499,6 +510,7 @@ route("onboard", async () => {
     $("#brandName").textContent = h.brand.name; $("#brandSub").textContent = h.brand.tagline;
     [CATALOG, WHO] = await Promise.all([api("GET", "/catalog"), api("GET", "/whoami")]);
     await refreshFleet();
+    await loadPeople();
   } catch (e) { main().innerHTML = `<div class="card"><div class="notice bad">${esc(e.message)}</div></div>`; return; }
   navigate();
 })();

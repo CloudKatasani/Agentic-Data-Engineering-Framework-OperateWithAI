@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--home", type=Path, default=None)
     d.add_argument("--profile", default=None, help="Build-With-AI Stack Profile id (see `profiles`)")
     sub.add_parser("faults", help="list the Demo Simulator fault library")
+    sub.add_parser("operating-model", help="print the agents, people and notification matrix (markdown)")
     sub.add_parser("profiles", help="list Stack Profiles and validate Operate's slot binding")
     g = sub.add_parser("guardrails", help="run guardrail scenarios OT-01 to OT-16")
     g.add_argument("--profile", default=None)
@@ -115,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
     sv.add_argument("--port", type=int, default=8090)
     sv.add_argument("--demo", action="store_true", help="seed both golden products to OG1 (Demo Simulator)")
     sv.add_argument("--profile", default=None, help="Stack Profile for --demo")
+    sv.add_argument("--autotick", type=float, default=None,
+                    help="run a cycle (monitors, agents, deadlines) every N seconds; omit to run cycles on demand")
     t = sub.add_parser("start-here", help="write the START HERE answers template")
     t.add_argument("--dp", default="<dp_id>")
     t.add_argument("--profile", default="<stack profile id>")
@@ -162,7 +165,9 @@ def main(argv: list[str] | None = None) -> int:
             print("Refusing to listen beyond localhost without ADEF_API_TOKEN or ADEF_IDENTITY_FILE.")
             return 2
         print(f"Console: http://{args.host}:{args.port}/   API docs: http://{args.host}:{args.port}/docs   home: {home}")
-        uvicorn.run(create_app(home), host=args.host, port=args.port, log_level="warning")
+        if args.autotick:
+            print(f"Scheduler: a cycle every {args.autotick:g} seconds (monitors, agents, response deadlines)")
+        uvicorn.run(create_app(home, autotick=args.autotick), host=args.host, port=args.port, log_level="warning")
         return 0
     if args.cmd == "compare-reasoners":
         from .agents.model_reasoner import DEFAULT_EFFORT, DEFAULT_MODEL, FallbackReasoner, ModelReasoner
@@ -279,6 +284,10 @@ def main(argv: list[str] | None = None) -> int:
         ok = (all(v >= 7 for v in m["diagnosis_faults_correct"].values()) and m["unsupported_causes"] == 0
               and m["guardrail_violations_reaching_execution"] == 0 and not m["rebind_mismatches"])
         return 0 if ok else 1
+    if args.cmd == "operating-model":
+        from .agents.team import render_operating_model
+        print(render_operating_model())
+        return 0
     if args.cmd == "faults":
         for f in FAULTS.values():
             print(f"{f.id}  {'/'.join(f.packs):18} {f.description}  [cause: {f.cause_class}]")
