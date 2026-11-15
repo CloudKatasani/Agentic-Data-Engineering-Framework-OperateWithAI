@@ -88,7 +88,9 @@ class SimulatorAdapter(OperateAdapter):
             "cost": {"daily": round(pack["cost_estimate_daily"] * 0.9, 2),
                      "estimate": pack["cost_estimate_daily"], "full_scans": 0},
             "grants": list(pack.get("access_model", [])),
-            "releases": [], "upstream_notices": [], "batches": {}, "trust_status": "trusted",
+            "releases": [], "upstream_notices": [], "trust_status": "trusted",
+            "batches": ({"B-20260105-05": {"object": "raw.outage_events", "rows": 1_200, "checksum": "c9f1-05",
+                                           "quarantined": False}} if pack_name == "utilities" else {}),
             "active_faults": [], "action_calls": [],
         }
 
@@ -141,7 +143,8 @@ class SimulatorAdapter(OperateAdapter):
             runs["meter_ingest"].update(status="waiting", logs=["INFO waiting for source file"])
             s["upstream_notices"].append({"source": "meter-head-end", "status": "file delayed"})
         elif fault_id == "F-02":
-            s["batches"]["B-20260105-06"] = {"rows": 1_200, "duplicate": True, "quarantined": False}
+            s["batches"]["B-20260105-06"] = {"object": "raw.outage_events", "rows": 1_200,
+                                             "checksum": "c9f1-05", "quarantined": False}
             for o in ("raw.outage_events", "curated.outages"):
                 objs[o]["rows"] += 1_200
         elif fault_id == "F-03":
@@ -153,6 +156,7 @@ class SimulatorAdapter(OperateAdapter):
         elif fault_id == "F-04":
             cols = objs["raw.billing_accounts"]["columns"]
             cols["acct_id"] = cols.pop("account_id")
+            s["source_changes"] = True
             runs["billing_ingest"].update(status="failed", logs=["ERROR column account_id not found"])
         elif fault_id == "F-05":
             rule = next(iter(s["quality"]))
@@ -236,6 +240,48 @@ class SimulatorAdapter(OperateAdapter):
     def releases(self, product: str) -> list[dict]:
         return list(self._p(product)["releases"])
 
+    # -- read-only evidence for Diagnosis (statistics and metadata only) ----------------------
+    def run_history(self, product: str, pipeline: str, days: int = 7) -> list[dict]:
+        r = self._p(product)["runs"][pipeline]
+        past = [{"window": (self.now - timedelta(days=d)).date().isoformat(), "status": "success",
+                 "duration_min": r["median_min"]} for d in range(days, 0, -1)]
+        return past + [{"window": r["window"], "status": r["status"], "duration_min": r["duration_min"]}]
+
+    def batch_stats(self, product: str, obj: str) -> list[dict]:
+        return [{"batch_id": k, "rows": b["rows"], "checksum": b["checksum"], "quarantined": b["quarantined"]}
+                for k, b in sorted(self._p(product)["batches"].items()) if b["object"] == obj]
+
+    def volume_breakdown(self, product: str, obj: str) -> dict:
+        o = self._p(product)["objects"][obj]
+        regions = o.get("regions")
+        if not regions:
+            return {}
+        out = {}
+        for region, share in regions.items():
+            expected = int(o["baseline"] * share)
+            observed = expected if o["rows"] == o["baseline"] else None
+            out[region] = {"expected": expected, "observed": observed}
+        if o["rows"] != o["baseline"]:
+            missing = o["baseline"] - o["rows"]
+            # attribute the shortfall to the region whose feed is degraded (from the source's own stats)
+            degraded = [n["source"].split("-")[1] for n in self._p(product)["upstream_notices"]
+                        if n["source"].startswith("region-")]
+            for region in out:
+                share_missing = missing if region in degraded else 0
+                out[region]["observed"] = out[region]["expected"] - share_missing
+        return out
+
+    def query_history(self, product: str) -> dict:
+        c = self._p(product)["cost"]
+        return {"full_scans": c["full_scans"], "top_object": c.get("top_object"),
+                "daily_cost": c["daily"], "estimate": c["estimate"]}
+
+    def profile(self, product: str, obj: str, column: str) -> dict:
+        """Column statistics only. There is no call that returns row values."""
+        o = self._p(product)["objects"][obj]
+        return {"object": obj, "column": column, "rows": o["rows"], "null_pct": 0.0,
+                "distinct_estimate": min(o["rows"], 10_000)}
+
     # -- actions ------------------------------------------------------------------------
     def _record(self, product: str, action: str, params: dict) -> None:
         self._p(product)["action_calls"].append({"action": action, **params})
@@ -274,7 +320,8 @@ class SimulatorAdapter(OperateAdapter):
         b = s["batches"].get(params["batch_id"])
         if b is None:
             return {"status": "failed", "reason": "unknown batch"}
-        if b["duplicate"] and not b["quarantined"]:
+        dup = any(o["checksum"] == b["checksum"] for k, o in s["batches"].items() if k != params["batch_id"])
+        if dup and not b["quarantined"]:
             b["quarantined"] = True
             for o in ("raw.outage_events", "curated.outages"):
                 s["objects"][o]["rows"] -= b["rows"]

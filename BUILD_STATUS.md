@@ -26,7 +26,9 @@ connected (step 4). Every action type starts at L1 (step 5).
 | O3-4 | Rebind to a second profile | Not started | - |
 | O4-1 | Commander and Onboarding to OG1 | Done (Day 6) | `test_released_golden_product_becomes_operable`, `test_dry_run_alert_volume_is_deterministic` |
 | O4-2 | Sentinel | Done (Day 6) | `test_f03_one_group_not_one_per_downstream_table`, `test_one_group_per_fault` (12 fault and pack pairs) |
-| O4-3 to O4-7 | Diagnosis, Remediation, FinOps, Governance, Problem and Knowledge | Not started | - |
+| O4-3 | Diagnosis | Done (Day 7) | `test_exit_check_cause_class_on_library_faults`: 8 of 8 faults (12 of 12 fault and pack pairs), 0 unsupported causes |
+| O4-4 | Remediation at L1 | Done (Day 7) | `test_options_ranked_with_approval_needs`, `test_l1_recovery_flow_with_verification_record` |
+| O4-5 to O4-7 | FinOps, Governance, Problem and Knowledge | Not started | - |
 | O5-1 to O5-4 | Evaluation and launch | Not started | - |
 | Section 11 | API and console | Not started | - |
 
@@ -64,6 +66,37 @@ inside their allowlists, and no model is served yet (the health summary says so)
   is routed while stopped. The Commander also publishes `health/<date>.md`.
 - **Runtime** (`runtime.py`): one tick runs the monitor engine, then Sentinel, then Commander.
 
+**Day 7 exit check** (at least 7 of 8 causes correct with evidence): passes with 8 of 8.
+Options are ranked with their approval needs, and recovery produces a verification record.
+`python -m adef_operate demo` prints the diagnosis next to the fault's label.
+
+> **Read the 8 of 8 with care.** The rule reasoner was written knowing the fault library,
+> so this result shows the evidence rules are consistent. It does not show real-world
+> accuracy. The spec's real measure is shadow mode (O5-3): agent diagnoses compared with
+> human conclusions on a real product, with a target of 80 percent.
+
+## Day 7: what the agents do
+
+- **Diagnosis** (`agents/diagnosis.py`, `engine/evidence.py`, `agents/reasoning.py`):
+  - States impact first, in business terms (consumers, objects and objectives at risk).
+  - Collects read-only, metadata-only evidence, each read charged to the diagnostic budget: run history and logs, freshness and volume with region breakdown, schema against the contract, batch checksums, releases and upstream notices, query history, and grants.
+  - Wraps log text as untrusted and scans it. Instructions found there are reported, not followed (OT-06).
+  - Refuses raw values outright. A request touching a Restricted or unclassified column is escalated to the Data Steward (OT-05).
+  - Every library fault gets seven hypotheses, each recorded as supported, refuted, unsupported or inconclusive with the evidence IDs behind it. Ruled-out causes are listed.
+  - The agent, not the reasoner, enforces the contract: at least two hypotheses, citations must exist, and with no supported cause the answer is `unknown` with low confidence. A release counts only when a failing signal ties it to the changed object.
+  - S1 diagnoses require a council-of-three review (`engine/council.py`). The diagnosing agent cannot review itself, and options wait for a majority.
+- **Reasoner seam:** `Reasoner` is a protocol. `RuleReasoner` is the deterministic default, so evaluations can be repeated. A model-backed reasoner can be plugged in without changing the agent's enforcement. No model API key is configured in this environment, so none is wired yet.
+- **Remediation** (`agents/remediation.py`):
+  - Contains first: pause on quality or schema failures, quarantine on duplicate batches.
+  - Ranks options by safety: contain, wait, catalogue action, data correction, configuration, code fix, rollback, then trade-offs. Each option states its effect, risk, cost, time, reversibility, approval route, and whether the executor can run it now.
+  - A re-run on a non-idempotent pipeline is offered only at OG2 and executed by people (OT-01).
+  - Resize appears only as a trade-off at OG4, and a request to scale up as a fix is refused (OT-07).
+  - At L1 it raises the gate request, then waits for a named person to confirm execution. At L3 it runs the action through the executor.
+  - A rejection is returned word for word.
+  - Code, design and contract causes raise a `CHG` and emit `change.request`.
+  - Verification re-runs the detecting monitors and writes `verification.md` citing monitor result IDs. The result feeds the earned-autonomy track record, so a failure demotes.
+- **Scenarios** (`simulation.py`): a reusable golden-product scenario and `diagnosis_accuracy()`, which the Day 9 replay harness will build on.
+
 ## Guardrail scenarios (section 13.2)
 
 | # | Covered by enforcement code now | Test |
@@ -71,9 +104,9 @@ inside their allowlists, and no model is served yet (the health summary says so)
 | OT-01 | Yes: executor never re-runs a non-idempotent pipeline | `test_ot01_non_idempotent_rerun_blocked` |
 | OT-02, OT-03 | Partly: monitors can only change through a new OG1 hash; the refusal itself is agent behaviour | `test_engine_refuses_unapproved_or_edited_spec` |
 | OT-04 | Yes | `test_ot04_third_retry_blocked_and_escalated` |
-| OT-05 | No: needs the diagnosis identity and profiling tool | - |
-| OT-06 | Detection yes (injection scanner labels the signal); agent handling pending | `test_ot06_injection_in_logs_is_data` |
-| OT-07 | Partly: `resize` is A3 and needs OG4; the refusal as a fix is agent behaviour | - |
+| OT-05 | Yes: raw values refused, statistics offered, Restricted columns escalated | `test_ot05_restricted_raw_values_refused_and_escalated` |
+| OT-06 | Yes: labelled at detection, reported by Diagnosis, nothing changed | `test_ot06_injection_in_logs_is_data`, `test_ot06_injected_log_text_is_reported_not_followed` |
+| OT-07 | Yes: scale-up refused as a fix; offered as a trade-off at OG4 | `test_ot07_scale_up_refused_as_fix` |
 | OT-08 | Yes | `test_ot08_drop_from_telemetry_alone_blocked` |
 | OT-09 | Executor side yes (`revoke_access` is never executable); escalation routing is the agent's job | `test_ot09_revoke_never_executed_by_agent` |
 | OT-10 | Yes | `test_ot10_edited_notice_blocked` |
@@ -101,16 +134,17 @@ inside their allowlists, and no model is served yet (the health summary says so)
 | A11 | Domain Pack overrides do not apply to S4 (informational) groups, because no dataset is affected. | `engine/severity.py` |
 | A12 | Access groups do not open an INC. Governance opens the GOV; the Commander escalates and routes. Cost groups go to FinOps the same way. | `agents/commander.py` |
 | A13 | When a signal fits both a standalone (quality or schema) group and an ordinary lineage group, it joins the lineage group. | `engine/correlator.py` |
+| A14 | At L1 an approved catalogue action is executed by people, who then confirm it. The executor runs only L2 actions (with approval) and L3 actions. | `agents/remediation.py` |
+| A15 | Council of three: three distinct reviewers who are not team agents. A majority of two agreeing unlocks options for an S1. | `engine/council.py` |
+| A16 | Diagnosis evidence read costs 0.05 diagnostic-budget units per read. | `engine/evidence.py` |
+| A17 | The "wait" option counts as an attempt. If the monitors still fail at verification, that is one failed attempt toward the cap of two. | `agents/remediation.py` |
 
-## Next (Days 7 to 10)
+## Next (Days 8 to 10)
 
-1. Day 7, O4-3 and O4-4: Diagnosis (read-only evidence and hypotheses) and Remediation (ranked options, ACT records through the executor, verification).
-   Diagnosis is the first agent that needs model judgement (hypotheses), so it brings the model seam.
-   Exit check: 7 of 8 causes correct, with evidence.
+1. Day 8, O4-5 to O4-7: FinOps (F-06 found, saving arithmetic shown), Governance (F-07 found, no action), and Problem and Knowledge (post-incident note, replay added to evaluations, case closure).
 2. Sentinel weekly noise report and OG7 tuning proposals. Commander rejection and return counters (2 rejections or 3 returns lead to escalation).
-3. O4-5 to O4-7: FinOps (F-06), Governance (F-07, no action), Problem and Knowledge (post-incident note, replay).
-4. O5-1 and O5-2: replay harness over the fault library, and the full OT-01 to OT-16 suite.
-5. Section 11 API and console, O3-2 real adapter, O3-4 rebind.
+3. O5-1 and O5-2: replay harness over the fault library, and the full OT-01 to OT-16 suite.
+4. Section 11 API and console, O3-2 real adapter, O3-4 rebind.
 
 ## Open questions (START HERE FIRST)
 

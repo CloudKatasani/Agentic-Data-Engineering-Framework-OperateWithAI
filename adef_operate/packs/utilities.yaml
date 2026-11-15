@@ -52,5 +52,7 @@ handover_pack:
     raw.meter_interval_reads: [regulated]
     curated.meter_interval: [regulated]
     mart.daily_consumption: [regulated]
+  restricted_columns:
+    raw.meter_interval_reads: [meter_id]
   schema_contract:
     raw.meter_interval_reads: {meter_id: string, interval_start: timestamp, kwh: decimal}

@@ -29,7 +29,7 @@ FOLDERS = [
 AGENTS = ("commander", "onboarding", "sentinel", "diagnosis", "remediation",
           "finops", "governance", "knowledge")
 CODE = ("collector", "monitor_engine", "case_store", "executor", "approvals", "registry",
-        "escalations")
+        "escalations", "council")
 
 ALLOW: dict[str, list[str]] = {
     "commander": ["cases/*/case.yaml", "cases/*/notice-draft.md", "health/**",
@@ -37,7 +37,8 @@ ALLOW: dict[str, list[str]] = {
                   "control/handover-pack.yaml"],
     "onboarding": ["service/**"],
     "sentinel": ["signals/groups/**", "signals/noise-report-*.md", "service/tuning-proposals/**"],
-    "diagnosis": ["cases/*/impact.md", "cases/*/evidence/**", "cases/*/diagnosis.md"],
+    "diagnosis": ["cases/*/impact.md", "cases/*/evidence/**", "cases/*/diagnosis.md",
+                  "cases/*/diagnosis.yaml"],
     "remediation": ["cases/*/options.md", "cases/*/actions/**", "cases/*/verification.md",
                     "change-requests/**"],
     "finops": ["finops/**"],
@@ -53,6 +54,7 @@ ALLOW: dict[str, list[str]] = {
                   "control/approval-requests/**"],
     "registry": ["control/registry.yaml", "control/budget-ledger.jsonl"],
     "escalations": ["control/escalations.jsonl"],
+    "council": ["cases/*/council.yaml"],
 }
 
 DENY: dict[str, list[str]] = {

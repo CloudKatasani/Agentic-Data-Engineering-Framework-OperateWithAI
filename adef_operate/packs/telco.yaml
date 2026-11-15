@@ -49,5 +49,7 @@ handover_pack:
   object_tags:
     raw.billing_accounts: [billing]
     mart.billing_summary: [billing]
+  restricted_columns:
+    raw.billing_accounts: [msisdn_hash]
   schema_contract:
     raw.billing_accounts: {account_id: string, plan_code: string, msisdn_hash: string}

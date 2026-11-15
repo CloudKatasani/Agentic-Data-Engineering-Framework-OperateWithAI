@@ -2,7 +2,8 @@
 
 ``demo`` releases and onboards both golden products, records OG0 and OG1 as the synthetic
 approvers named in the packs (simulation only), then injects each library fault and runs
-one control-plane tick: monitor engine -> Sentinel grouping -> Commander case opening.
+one control-plane tick: monitor engine -> Sentinel grouping -> Commander case opening,
+then diagnoses each group.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from .connectors.simulator import FAULTS, SimulatorAdapter
 from .engine.approvals import Approvals
 from .connectors.simulator import SIM_NOW
 from .packs import handover_pack
+from .agents import DiagnosisAgent
 from .runtime import OpsRuntime
 
 
@@ -55,12 +57,19 @@ def demo(home: Path) -> int:
             print(f"  {fid} {fault.description}")
             print(f"     {len(out['signals'])} signals -> {len(out['groups'])} group(s); first failing: "
                   f"{', '.join(g['first_failing_object'] for g in out['groups'])}")
+            diag = DiagnosisAgent(res.workspace, sim)
             for o in out["outcomes"]:
+                r = diag.diagnose(o["case"]) if o.get("case") else diag.diagnose_group(
+                    next(g for g in out["groups"] if g["id"] == o["group"]))
+                cause = (f"     diagnosis: {r.cause_class} ({r.confidence}), {len(r.supporting_evidence)} supporting "
+                         f"evidence, {len(r.ruled_out)} ruled out [label: {fault.cause_class}]")
                 if o["outcome"] == "opened":
                     print(f"     {o['case']} {o['rule']} | trust: {o.get('trust_status') or 'unchanged'}")
-                else:
-                    print(f"     {o['outcome']} -> {o.get('routed_to', '')}"
-                          + (f" (escalated to {o['escalated_to']})" if o.get("escalated_to") else ""))
+                    print(cause)
+                    continue
+                print(f"     {o['outcome']} -> {o.get('routed_to', '')}"
+                      + (f" (escalated to {o['escalated_to']})" if o.get("escalated_to") else ""))
+                print(cause)
         print()
     return 0
 

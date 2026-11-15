@@ -59,6 +59,7 @@ class HandoverPack(_Model):
     access_model: list[str] = Field(default_factory=list)
     schema_contract: dict[str, dict[str, str]] = Field(default_factory=dict)
     object_tags: dict[str, list[str]] = Field(default_factory=dict)
+    restricted_columns: dict[str, list[str]] = Field(default_factory=dict)
     build_g7_autonomy: dict[str, str] = Field(default_factory=dict)
 
 

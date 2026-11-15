@@ -5,7 +5,9 @@ that need model judgement (Diagnosis onward) add a model seam on top of the same
 """
 
 from .commander import CommanderAgent
+from .diagnosis import DiagnosisAgent
+from .remediation import RemediationAgent
 from .onboarding import OnboardingAgent
 from .sentinel import SentinelAgent
 
-__all__ = ["CommanderAgent", "OnboardingAgent", "SentinelAgent"]
+__all__ = ["CommanderAgent", "DiagnosisAgent", "OnboardingAgent", "RemediationAgent", "SentinelAgent"]

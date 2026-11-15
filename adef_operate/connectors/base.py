@@ -54,6 +54,28 @@ class OperateAdapter(ABC):
     @abstractmethod
     def run_logs(self, product: str, pipeline: str) -> list[str]: ...
 
+    # Optional evidence reads; adapters return metadata and statistics only.
+    def run_history(self, product: str, pipeline: str, days: int = 7) -> list[dict]:
+        return []
+
+    def batch_stats(self, product: str, obj: str) -> list[dict]:
+        return []
+
+    def volume_breakdown(self, product: str, obj: str) -> dict:
+        return {}
+
+    def query_history(self, product: str) -> dict:
+        return {}
+
+    def upstream_notices(self, product: str) -> list[dict]:
+        return []
+
+    def releases(self, product: str) -> list[dict]:
+        return []
+
+    def profile(self, product: str, obj: str, column: str) -> dict:
+        return {}
+
     def read(self, signal_class: str, product: str, monitor: dict) -> dict:
         spec = self.signals.get(signal_class)
         if spec is None:
