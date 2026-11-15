@@ -1,0 +1,59 @@
+/* OperateWithAI additions on top of the shared Build-With-AI stylesheet. */
+.content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.content > main { flex: 1; }
+.clockbar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 28px;
+  background: var(--panel); border-bottom: 1px solid var(--border); font-size: 13px; }
+.clockbar .time { font-family: var(--mono); font-weight: 700; font-size: 15px; }
+.clockbar .sp { flex: 1; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); margin-right: 6px; flex: none; }
+.dot.green { background: var(--ok); } .dot.amber { background: #e0a100; } .dot.red { background: var(--bad); }
+.pri { display: inline-block; min-width: 28px; text-align: center; padding: 1px 6px; border-radius: 5px; font-weight: 700; font-size: 12px; }
+.pri.P1 { background: var(--bad); color: #fff; } .pri.P2 { background: var(--bad-bg); color: var(--bad); }
+.pri.P3 { background: var(--warn-bg); color: var(--warn); } .pri.P4 { background: var(--panel-2); color: var(--muted); }
+.svc { border-left: 5px solid var(--ok); }
+.svc.s-at-risk { border-left-color: #e0a100; } .svc.s-breach-predicted, .svc.s-breached, .svc.s-delivered-late { border-left-color: var(--bad); }
+.svc .nm { font-weight: 700; } .svc .big { font-family: var(--mono); font-size: 22px; font-weight: 700; margin: 6px 0 2px; }
+.tower { padding: 12px 14px; } .tower h3 { margin: 0 0 2px; font-size: 14px; display: flex; align-items: center; }
+.tower .sys { display: flex; align-items: baseline; font-size: 12.5px; margin-top: 5px; } .tower .sys .dot { width: 8px; height: 8px; position: relative; top: -1px; }
+.ask { border-left: 5px solid var(--warn); } .ask.fyi { border-left-color: var(--info); } .ask.late { border-left-color: var(--bad); }
+.ask h3 { margin: 4px 0 6px; } .ask pre, .pre { white-space: pre-wrap; font-family: var(--sans); font-size: 13.5px; margin: 0 0 10px; }
+.ask .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; padding: 9px 0; border-bottom: 1px dashed var(--border); align-items: start; }
+.steps li:last-child { border-bottom: 0; }
+.steps .num { width: 24px; height: 24px; border-radius: 50%; background: var(--panel-2); color: var(--muted); font-weight: 700; font-size: 12px; display: grid; place-items: center; }
+.steps li.done .num { background: var(--ok-bg); color: var(--ok); } .steps li.failed .num { background: var(--bad-bg); color: var(--bad); }
+.steps li.live .num { background: var(--warn-bg); color: var(--warn); }
+.steps .res { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.chain { display: flex; flex-wrap: wrap; gap: 4px; align-items: stretch; margin: 6px 0 14px; }
+.cn { border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px; background: var(--panel); max-width: 190px; }
+.cn .k { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.cn.root { border-color: var(--bad); background: var(--bad-bg); } .cn.hit { border-color: #e0a100; } .cn.ok { opacity: .75; }
+.cn .st { font-weight: 700; } .cn .st.failed, .cn .st.not-ready { color: var(--bad); } .cn .st.succeeded, .cn .st.ready { color: var(--ok); }
+.cn .st.waiting, .cn .st.running { color: var(--warn); }
+.arrow { align-self: center; color: var(--muted); }
+.gantt { position: relative; }
+.grow { display: grid; grid-template-columns: 250px 1fr; gap: 10px; align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--border); font-size: 12.5px; }
+.gtrack { position: relative; height: 22px; background: var(--panel-2); border-radius: 5px; overflow: hidden; }
+.gbar { position: absolute; top: 4px; height: 14px; border-radius: 4px; min-width: 3px; }
+.gbar.plan { top: 0; height: 22px; background: transparent; border: 1px dashed var(--muted); opacity: .55; }
+.gbar.succeeded { background: var(--ok); } .gbar.running { background: var(--info); } .gbar.failed { background: var(--bad); }
+.gbar.scheduled, .gbar.waiting { background: repeating-linear-gradient(45deg, var(--warn-bg), var(--warn-bg) 5px, transparent 5px, transparent 9px); border: 1px solid var(--warn); }
+.gnow { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 2; }
+.gdead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); }
+.gaxis { position: relative; height: 16px; font-size: 10.5px; color: var(--muted); font-family: var(--mono); }
+.gaxis span { position: absolute; transform: translateX(-50%); }
+.agent { border-top: 4px solid var(--info); } .agent h3 { margin: 0; } .agent ul { margin: 4px 0 8px 18px; padding: 0; font-size: 13px; }
+.agent .lbl { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-top: 8px; }
+.flowrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.fstep { flex: 1 1 130px; border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; font-size: 12.5px; background: var(--panel); border-top: 4px solid var(--info); }
+.fstep.person { border-top-color: #e0a100; background: var(--warn-bg); } .fstep.both { border-top-color: var(--violet); }
+.fstep b { display: block; font-size: 13.5px; }
+details.ke { border: 1px solid var(--border); border-radius: 9px; padding: 10px 14px; margin-bottom: 8px; background: var(--panel); }
+details.ke summary { cursor: pointer; font-weight: 700; } details.ke summary .muted { font-weight: 400; }
+.scn { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 10px 0; border-bottom: 1px dashed var(--border); }
+.scn input { width: auto; margin-top: 3px; }
+.funnel { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; } .funnel b { font-size: 20px; font-family: var(--mono); }
+textarea.big { min-height: 260px; font-family: var(--sans); }
+@media (max-width: 900px) { .grow { grid-template-columns: 1fr; } .clockbar { padding: 8px 14px; } }
+main h2 { margin-top: 22px; }

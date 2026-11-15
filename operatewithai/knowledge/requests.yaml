@@ -1,0 +1,23 @@
+# Service request catalogue. The Service Request Agent validates each request against these
+# rules, collects the approvals shown, fulfils it with a catalogue action and closes it.
+catalogue:
+  - id: SR-SNOW-ROLE
+    title: "Snowflake access: grant a role to a user"
+    tower: snowdbt
+    fields: [{id: user, label: "User (login name)"}, {id: role, label: "Role", options: [ANALYST_FINANCE_RO, ANALYST_POLICY_RO, CLAIMS_PII_RO]}, {id: reason, label: "Business reason"}]
+    action: snowflake.grant_role
+    roles:
+      ANALYST_FINANCE_RO: {approvers: [data_owner_finance], note: "Read access to finance marts"}
+      ANALYST_POLICY_RO:  {approvers: [data_owner_finance], note: "Read access to policy marts"}
+      CLAIMS_PII_RO:      {approvers: [data_owner_claims, security_lead], note: "Restricted: claimant personal data. Needs the data owner and the security lead."}
+  - id: SR-REPORT-RERUN
+    title: "Re-run a report or refresh a dataset"
+    tower: bi
+    fields: [{id: node, label: "Report or dataset", options: [pbi.fin_close, pbi.policy_ops, cognos.reg_liquidity, cognos.claims_aging]}, {id: reason, label: "Reason"}]
+    standard: true     # no approval: runs when the data it reads is ready
+  - id: SR-SVC-PWD
+    title: "Rotate a service account password before it expires"
+    tower: dba_oracle
+    fields: [{id: account, label: "Account"}, {id: reason, label: "Reason"}]
+    action: oracle.unexpire_account
+    approvers: [security_lead]

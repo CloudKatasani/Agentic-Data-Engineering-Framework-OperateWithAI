@@ -1,0 +1,16 @@
+# How each tool in the client estate is connected. "reads" is what the Watch Desk Agent
+# collects (metadata, status and logs only, never business rows); "acts" are catalogue actions.
+connectors:
+  - {tool: Oracle Database, id: oracle, reads: "DBA_USERS (account status, expiry), V$SESSION and alert log errors, tablespace usage", via: "Read-only monitoring account over JDBC", acts: "Service account rotation through the vault (approval)"}
+  - {tool: IBM Db2, id: db2, reads: "MON_GET_LOCKS, MON_GET_TABLESPACE, db2diag.log errors", via: "Read-only monitoring account", acts: "None: DBA actions stay with the Db2 DBA"}
+  - {tool: Oracle GoldenGate, id: goldengate, reads: "INFO ALL (status, lag), ggserr.log, process reports", via: "Admin Service REST (Microservices) or GGSCI over SSH", acts: "Start a process from its checkpoint"}
+  - {tool: Informatica PowerCenter, id: informatica, reads: "Workflow and session runs (REP_WFLOW_RUN, REP_SESS_LOG), session logs", via: "Repository views and pmcmd", acts: "Recover a workflow; reload one business date (approval)"}
+  - {tool: Snowflake, id: snowflake, reads: "Resource monitors, warehouse state, QUERY_HISTORY and LOAD_HISTORY metadata", via: "ACCOUNT_USAGE with a monitoring role", acts: "Raise a quota (approval); additive DDL on RAW (approval); grant a role (approval)"}
+  - {tool: dbt, id: dbt, reads: "Job runs, run_results.json, sources.json (freshness)", via: "dbt Cloud API webhooks", acts: "Retry a failed run"}
+  - {tool: Denodo, id: denodo, reads: "Scheduler job results, cache load status, data source pools", via: "Denodo Scheduler REST and monitoring views", acts: "Start a cache job"}
+  - {tool: Power BI, id: powerbi, reads: "Dataset refresh history, gateway status", via: "Power BI REST API (service principal)", acts: "Refresh a dataset"}
+  - {tool: IBM Cognos Analytics, id: cognos, reads: "Audit database (COGIPF_RUNREPORT), schedule history, dispatcher status", via: "Audit DB and REST API", acts: "Re-run a schedule; restart the report service (approval)"}
+  - {tool: Dynatrace, id: dynatrace, reads: "Problems (opened and resolved), host metrics", via: "Problem notification webhook and Problems API v2", acts: "None"}
+  - {tool: AWS and Azure, id: cloud, reads: "VM state, activity log", via: "CloudWatch and Azure Monitor through Dynatrace; Resource Manager", acts: "Start a restartable VM; stop an allow-listed process"}
+  - {tool: Managed file transfer, id: mft, reads: "Expected and received files, sizes, times", via: "MFT gateway audit API", acts: "None"}
+  - {tool: ServiceNow, id: servicenow, reads: "Approved changes (change calendar), CMDB", via: "Table API", acts: "Create and update incidents, requests and problems (the system of record)"}

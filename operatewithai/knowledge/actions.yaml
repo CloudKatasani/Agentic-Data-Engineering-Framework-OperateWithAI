@@ -1,0 +1,44 @@
+# The action catalogue: the only things an agent can change in the client estate.
+# Every action has a risk class that decides who must say yes before the agent runs it.
+#   standard  - a pre-agreed runbook step. Runs once the assigned engineer accepts the plan.
+#   approval  - also needs a named decision from the role shown, every time.
+#   never     - agents do not do this. A person does it under the client's change process.
+# Diagnostic checks are read-only and are not listed here; agents run them without asking.
+
+actions:
+  - {id: goldengate.start_process,        tool: GoldenGate,  class: standard, title: "Start a GoldenGate extract, pump or replicat",
+     how: "GGSCI START <group> / Admin Service REST", why: "Restart after the cause is fixed; checkpoint position is kept"}
+  - {id: informatica.restart_workflow,    tool: Informatica, class: standard, title: "Restart a workflow in recovery mode",
+     how: "pmcmd recoverworkflow", why: "Session recovery resumes from the last commit; no duplicate rows"}
+  - {id: dbt.retry_job,                   tool: dbt,         class: standard, title: "Retry the dbt job for models not yet built",
+     how: "dbt Cloud API: retry failed run (dbt retry)", why: "Builds only what failed or was skipped"}
+  - {id: denodo.reload_cache,             tool: Denodo,      class: standard, title: "Run a Denodo Scheduler cache job",
+     how: "Denodo Scheduler REST: start job", why: "Reloads the cache from the source views"}
+  - {id: powerbi.refresh_dataset,         tool: Power BI,    class: standard, title: "Refresh a Power BI dataset",
+     how: "Power BI REST: POST datasets/{id}/refreshes", why: "Same as the scheduled refresh"}
+  - {id: cognos.rerun_schedule,           tool: Cognos,      class: standard, title: "Re-run a Cognos schedule or burst",
+     how: "Cognos REST / run-now on the schedule", why: "Same as the scheduled run; burst recipients unchanged"}
+  - {id: azure.restart_vm,                tool: Azure,       class: standard, title: "Start or restart a virtual machine",
+     how: "Azure Resource Manager: virtualMachines/start", why: "Only for hosts on the restartable list (gateways, agents)"}
+  - {id: infra.stop_process,              tool: AWS/Azure,   class: standard, title: "Stop a named non-production-critical process on a host",
+     how: "SSM Run Command / Azure Run Command", why: "Only processes on the allow list (backup agents, scanners)"}
+  - {id: snowflake.add_column_from_source, tool: Snowflake,  class: approval, approver_role: change_manager, title: "Add a column to a RAW replicated table to match its source",
+     how: "ALTER TABLE ... ADD COLUMN (additive only)", why: "Emergency change: additive DDL on the landing schema"}
+  - {id: oracle.unexpire_account,         tool: Oracle,      class: approval, approver_role: security_lead, title: "Rotate a service account password and reopen the account",
+     how: "Vault rotation + ALTER USER ... IDENTIFIED BY <vault secret>", why: "Credential action; the secret never leaves the vault"}
+  - {id: snowflake.raise_quota,           tool: Snowflake,   class: approval, approver_role: sdm, title: "Raise a resource monitor quota and resume the warehouse",
+     how: "ALTER RESOURCE MONITOR ... SET CREDIT_QUOTA", why: "Spends client money"}
+  - {id: informatica.reload_file_batch,   tool: Informatica, class: approval, approver_role: data_owner, title: "Truncate and reload one business date from a corrected file",
+     how: "pmcmd startworkflow with the reload parameter file", why: "Replaces business data; the data owner decides"}
+  - {id: cognos.restart_report_service,   tool: Cognos,      class: approval, approver_role: bi_lead, title: "Restart the Cognos batch report service",
+     how: "Cognos Administration: stop/start BatchReportService", why: "Interrupts reports that are running for other users"}
+  - {id: snowflake.grant_role,            tool: Snowflake,   class: approval, approver_role: data_owner, title: "Grant a Snowflake role to a user",
+     how: "GRANT ROLE ... TO USER", why: "Access to data; the owner of the data decides"}
+
+never:
+  - {title: "Skip or discard a GoldenGate transaction, or run HANDLECOLLISIONS", why: "Silently loses or duplicates business data"}
+  - {title: "Kill database sessions or force Db2 applications", why: "Can roll back business transactions; DBA decision under the client's process"}
+  - {title: "Drop, truncate or delete data outside a named reload action", why: "Not reversible"}
+  - {title: "Change production code: mappings, dbt models, report definitions", why: "Goes through the client's release process, not operations"}
+  - {title: "Read or copy business data rows", why: "Agents work from job, log and metadata only"}
+  - {title: "Send anything to the client without the incident manager's approval", why: "A person owns what the client is told"}

@@ -3,21 +3,21 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adef-operate"
-version = "0.1.0"
-description = "Operate-With-AI: approval-gated operations team for live data products (ADEF suite)"
+name = "operatewithai"
+version = "2.0.0"
+description = "OperateWithAI: AI agents and people running a data platform managed service (ADEF suite)"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.5", "PyYAML>=6.0", "fastapi>=0.115", "uvicorn>=0.30"]
+dependencies = ["PyYAML>=6.0", "fastapi>=0.115", "uvicorn>=0.30"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "httpx>=0.27", "anthropic>=2.8"]
-model = ["anthropic>=2.8"]
+dev = ["pytest>=8", "httpx>=0.27"]
+llm = ["anthropic>=2.8"]
 
 [tool.setuptools.packages.find]
-include = ["adef_operate*"]
+include = ["operatewithai*"]
 
 [tool.setuptools.package-data]
-adef_operate = ["packs/*.yaml", "stack/profiles/*.yaml", "web/*.html", "web/*.js", "web/*.css", "web/fonts/*"]
+operatewithai = ["clients/*/*.yaml", "knowledge/*.yaml", "web/*.html", "web/*.js", "web/*.css", "web/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

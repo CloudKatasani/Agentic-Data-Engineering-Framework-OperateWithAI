@@ -1,0 +1,164 @@
+# Client environment model for the managed service. Everything the agents know about the
+# client lives here: systems, the data chain, business services and deadlines, the nightly
+# batch, support towers, the roster, priorities and SLAs. Synthetic demo client; replace
+# this file (or add another folder under clients/) for a real engagement. No secrets here.
+
+client:
+  id: demo
+  name: "Aldermoor Insurance (synthetic demo client)"
+  itsm: ServiceNow
+  batch_day_start: "00:30"
+
+# ---------------------------------------------------------------------------------------
+# Support model
+towers:
+  - {id: watch,      name: "L1 Watch Desk"}
+  - {id: etl,        name: "ETL - Informatica"}
+  - {id: repl,       name: "Replication - GoldenGate"}
+  - {id: dba_oracle, name: "DBA - Oracle"}
+  - {id: dba_db2,    name: "DBA - Db2"}
+  - {id: snowdbt,    name: "Snowflake and dbt"}
+  - {id: bi,         name: "BI - Power BI and Cognos"}
+  - {id: virt,       name: "Virtualization - Denodo"}
+  - {id: cloud,      name: "Cloud and Infra - AWS and Azure"}
+  - {id: integ,      name: "Integrations - MFT and API"}
+
+people:
+  # On-call engineers per tower (night shift shown; a real roster has a row per shift).
+  - {name: "Priya Nair",       title: "L1 Operator",                tower: watch,      on_call: true}
+  - {name: "Elena Petrova",    title: "Informatica Engineer",       tower: etl,        on_call: true}
+  - {name: "Tomasz Zielinski", title: "GoldenGate Engineer",        tower: repl,       on_call: true}
+  - {name: "Hannah Okafor",    title: "Oracle DBA",                 tower: dba_oracle, on_call: true}
+  - {name: "Luis Ortega",      title: "Db2 DBA",                    tower: dba_db2,    on_call: true}
+  - {name: "Mei Tanaka",       title: "Snowflake and dbt Engineer", tower: snowdbt,    on_call: true}
+  - {name: "Sofia Marino",     title: "BI Engineer",                tower: bi,         on_call: true}
+  - {name: "Arjun Patel",      title: "Denodo Engineer",            tower: virt,       on_call: true}
+  - {name: "Grace Liu",        title: "Cloud Engineer",             tower: cloud,      on_call: true}
+  - {name: "Omar Haddad",      title: "Integration Engineer",       tower: integ,      on_call: true}
+  # Decision roles
+  - {name: "Claire Dubois",    title: "Incident Manager",           role: incident_manager}
+  - {name: "Nathan Brooks",    title: "Service Delivery Manager",   role: sdm}
+  - {name: "Rajiv Menon",      title: "DBA Lead",                   role: dba_lead}
+  - {name: "Daniel Cho",       title: "BI Lead",                    role: bi_lead}
+  - {name: "Ingrid Solberg",   title: "Change Manager",             role: change_manager}
+  - {name: "Victor Alvarez",   title: "Security Lead",              role: security_lead}
+  # Client side
+  - {name: "Helen Park",       title: "Finance Data Owner (client)", role: data_owner_finance}
+  - {name: "Samuel Reed",      title: "Claims Data Owner (client)",  role: data_owner_claims}
+  - {name: "Laura Chen",       title: "Client Service Owner",        role: client_service_owner}
+
+roles:
+  incident_manager:     "Runs major incidents; approves every stakeholder message"
+  sdm:                  "Owns the service and its SLAs; approves cost decisions and service reports"
+  dba_lead:             "Approves database changes: space, sessions, DDL in production"
+  bi_lead:              "Approves restarts of shared BI services"
+  change_manager:       "Approves emergency changes"
+  security_lead:        "Approves account, credential and access actions"
+  data_owner_finance:   "Decides on finance data: reloads, publishing with known issues, access"
+  data_owner_claims:    "Decides on claims data: reloads, publishing with known issues, access"
+  client_service_owner: "Receives major incident communications for the client"
+
+priority_matrix:   # impact x urgency -> priority (ServiceNow style)
+  high:   {high: P1, medium: P2, low: P3}
+  medium: {high: P2, medium: P3, low: P4}
+  low:    {high: P3, medium: P4, low: P4}
+
+sla_policy:        # minutes
+  P1: {respond: 15,   resolve: 240}
+  P2: {respond: 30,   resolve: 480}
+  P3: {respond: 240,  resolve: 4320}
+  P4: {respond: 1440, resolve: 7200}
+
+# ---------------------------------------------------------------------------------------
+# Configuration items (systems)
+cis:
+  - {id: ORAPRD_ERP,  tool: oracle,      name: "Oracle ERP database 19c",            tower: dba_oracle, host: ora-erp-01,  cloud: aws}
+  - {id: DB2PRD_POL,  tool: db2,         name: "Db2 policy administration database", tower: dba_db2,    host: db2-pol-01,  cloud: on-prem}
+  - {id: OGG_ERP,     tool: goldengate,  name: "GoldenGate ERP to Snowflake",        tower: repl,       host: ogg-hub-01,  cloud: aws}
+  - {id: INFA_PRD,    tool: informatica, name: "Informatica PowerCenter production", tower: etl,        host: infa-prd-01, cloud: aws}
+  - {id: MFT_GATEWAY, tool: mft,         name: "Managed file transfer gateway",      tower: integ,      host: mft-01,      cloud: aws}
+  - {id: SNOWFLAKE,   tool: snowflake,   name: "Snowflake account",                  tower: snowdbt,    cloud: aws}
+  - {id: DBT_CLOUD,   tool: dbt,         name: "dbt Cloud project analytics",        tower: snowdbt,    cloud: saas}
+  - {id: DENODO_PRD,  tool: denodo,      name: "Denodo Virtual DataPort production", tower: virt,       host: denodo-prd,  cloud: azure}
+  - {id: PBI_SERVICE, tool: powerbi,     name: "Power BI service",                   tower: bi,         cloud: azure}
+  - {id: PBI_GATEWAY, tool: powerbi,     name: "Power BI on-premises data gateway",  tower: cloud,      host: gw-az-01,    cloud: azure}
+  - {id: COGNOS_PRD,  tool: cognos,      name: "Cognos Analytics production",        tower: bi,         host: cognos-prd,  cloud: azure}
+  - {id: DYNATRACE,   tool: dynatrace,   name: "Dynatrace (infrastructure and application monitoring)", tower: cloud, cloud: saas}
+
+service_accounts:
+  - {ci: ORAPRD_ERP, account: SVC_DATA, used_by: [OGG_ERP, INFA_PRD], password_expires_in_days: 9}
+  - {ci: DB2PRD_POL, account: svcetl,   used_by: [INFA_PRD],          password_expires_in_days: 61}
+
+snowflake:
+  warehouses:
+    - {name: WH_LOAD,      resource_monitor: RM_LOAD,      monthly_quota_credits: 400}
+    - {name: WH_TRANSFORM, resource_monitor: RM_TRANSFORM, monthly_quota_credits: 900}
+    - {name: WH_BI,        resource_monitor: RM_BI,        monthly_quota_credits: 600}
+
+# ---------------------------------------------------------------------------------------
+# The data chain. Nodes are sources, replication, jobs, datasets, caches, refreshes and
+# reports; edges run upstream -> downstream. Jobs carry the nightly plan.
+nodes:
+  - {id: ora.erp,              ci: ORAPRD_ERP,  kind: source,      name: "ERP general ledger tables"}
+  - {id: db2.policy,           ci: DB2PRD_POL,  kind: source,      name: "Policy administration tables"}
+  - {id: mft.claims_file,      ci: MFT_GATEWAY, kind: file,        name: "Claims vendor file claims_YYYYMMDD.csv", expected_by: "01:30"}
+  - {id: ogg.rep_snf,          ci: OGG_ERP,     kind: replication, name: "GoldenGate EXT_ERP > PMP_ERP > REP_SNF", max_lag_minutes: 15}
+  - {id: snow.raw.erp,         ci: SNOWFLAKE,   kind: dataset,     name: "RAW.ERP (replicated)"}
+  - {id: infa.wf_policy,       ci: INFA_PRD,    kind: job,         name: "wf_POLICY_DAILY_LOAD",  planned: "01:00", duration: 45, requires: [DB2PRD_POL]}
+  - {id: infa.wf_gl_controls,  ci: INFA_PRD,    kind: job,         name: "wf_GL_CONTROL_TOTALS",  planned: "01:15", duration: 15, requires: [ORAPRD_ERP]}
+  - {id: infa.wf_claims,       ci: INFA_PRD,    kind: job,         name: "wf_CLAIMS_FILE_LOAD",   planned: "01:45", duration: 30}
+  - {id: snow.raw.policy,      ci: SNOWFLAKE,   kind: dataset,     name: "RAW.POLICY"}
+  - {id: snow.raw.gl_controls, ci: SNOWFLAKE,   kind: dataset,     name: "RAW.GL_CONTROLS"}
+  - {id: snow.raw.claims,      ci: SNOWFLAKE,   kind: dataset,     name: "RAW.CLAIMS"}
+  - {id: dbt.nightly_build,    ci: DBT_CLOUD,   kind: job,         name: "dbt job nightly_build", planned: "02:30", duration: 60, requires: [SNOWFLAKE], warehouse: WH_TRANSFORM,
+     builds: [snow.mart.fin, snow.mart.policy, snow.mart.claims]}
+  - {id: snow.mart.fin,        ci: SNOWFLAKE,   kind: dataset,     name: "ANALYTICS.MART_FINANCE (fct_gl_balances)",    model: fct_gl_balances}
+  - {id: snow.mart.policy,     ci: SNOWFLAKE,   kind: dataset,     name: "ANALYTICS.MART_POLICY (fct_policy_premium)",  model: fct_policy_premium}
+  - {id: snow.mart.claims,     ci: SNOWFLAKE,   kind: dataset,     name: "ANALYTICS.MART_CLAIMS (fct_claims)",          model: fct_claims}
+  - {id: denodo.cache_fin,     ci: DENODO_PRD,  kind: job,         name: "Denodo Scheduler job cache_fin_views", planned: "04:00", duration: 30}
+  - {id: denodo.bv_fin_close,  ci: DENODO_PRD,  kind: dataset,     name: "Denodo view bv_fin_close (cached)"}
+  - {id: pbi.fin_close,        ci: PBI_SERVICE, kind: job,         name: "Power BI refresh: Finance Daily Close", planned: "05:00", duration: 30, requires: [PBI_GATEWAY, DENODO_PRD]}
+  - {id: pbi.policy_ops,       ci: PBI_SERVICE, kind: job,         name: "Power BI refresh: Policy and Premium Ops", planned: "05:00", duration: 20}
+  - {id: cognos.reg_liquidity, ci: COGNOS_PRD,  kind: job,         name: "Cognos burst: Regulatory Liquidity Report", planned: "05:30", duration: 40}
+  - {id: cognos.claims_aging,  ci: COGNOS_PRD,  kind: job,         name: "Cognos schedule: Claims Aging", planned: "06:00", duration: 20}
+
+edges:
+  - [ora.erp, ogg.rep_snf]
+  - [ogg.rep_snf, snow.raw.erp]
+  - [db2.policy, infa.wf_policy]
+  - [infa.wf_policy, snow.raw.policy]
+  - [ora.erp, infa.wf_gl_controls]
+  - [infa.wf_gl_controls, snow.raw.gl_controls]
+  - [mft.claims_file, infa.wf_claims]
+  - [infa.wf_claims, snow.raw.claims]
+  # dbt builds each mart from its own sources (the dbt job node lists what it builds)
+  - [snow.raw.erp, snow.mart.fin]
+  - [snow.raw.gl_controls, snow.mart.fin]
+  - [snow.raw.policy, snow.mart.policy]
+  - [snow.raw.claims, snow.mart.claims]
+  - [snow.mart.fin, denodo.cache_fin]
+  - [denodo.cache_fin, denodo.bv_fin_close]
+  - [denodo.bv_fin_close, pbi.fin_close]
+  - [snow.mart.policy, pbi.policy_ops]
+  - [snow.mart.fin, cognos.reg_liquidity]
+  - [snow.mart.policy, cognos.reg_liquidity]
+  - [snow.mart.claims, cognos.claims_aging]
+
+# ---------------------------------------------------------------------------------------
+# What the business is promised
+services:
+  - {id: BS-FIN-CLOSE, name: "Finance Daily Close dashboard (Power BI)", delivered_by: pbi.fin_close,
+     deadline: "07:00", tier: 1, regulated: false, owner_role: data_owner_finance, audience: "CFO office, Finance operations"}
+  - {id: BS-REG-LIQ, name: "Regulatory Liquidity Report (Cognos)", delivered_by: cognos.reg_liquidity,
+     deadline: "08:00", tier: 1, regulated: true, owner_role: data_owner_finance, audience: "Treasury, Regulatory reporting"}
+  - {id: BS-POLICY-OPS, name: "Policy and Premium Ops dashboard (Power BI)", delivered_by: pbi.policy_ops,
+     deadline: "07:00", regulated: false, owner_role: data_owner_finance, audience: "Underwriting operations"}
+  - {id: BS-CLAIMS, name: "Claims Aging report (Cognos)", delivered_by: cognos.claims_aging,
+     deadline: "07:30", regulated: false, owner_role: data_owner_claims, audience: "Claims operations"}
+
+# Approved changes (from the change calendar). Alerts on a CI inside its window are expected.
+changes:
+  - {id: CHG0031877, ci: ORAPRD_ERP, summary: "ERP release 24.3: add column COST_CENTER_SEGMENT to GL_JE_LINES",
+     window_start: "2026-03-02 21:00", window_end: "2026-03-02 23:00", requested_by: "ERP application team"}
+  - {id: CHG0031902, ci: COGNOS_PRD, summary: "Cognos content store index maintenance",
+     window_start: "2026-03-07 22:00", window_end: "2026-03-08 01:00", requested_by: "BI tower"}

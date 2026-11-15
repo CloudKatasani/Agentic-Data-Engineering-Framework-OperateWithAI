@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OperateWithAI - Managed Data Operations</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2313804b'/><path d='M6 17 h6 l3 -7 l4 13 l3 -6 h4' fill='none' stroke='white' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/></svg>">
+  <link rel="stylesheet" href="/static/styles.css?v=2.0.0">
+  <link rel="stylesheet" href="/static/operate.css?v=2.0.0">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo" style="background:var(--ok)">O</div>
+        <div><div class="brand-name">DataCrew- OperateWithAI</div><div class="brand-sub" id="brandSub">Managed data operations</div></div>
+      </div>
+      <nav id="nav">
+        <div style="padding:2px 6px 8px"><label style="margin:0 0 4px">You are</label><select id="personPick" aria-label="You are"></select></div>
+        <div class="nav-group">Operate</div>
+        <a href="#/home" data-route="home">Command center</a>
+        <a href="#/inbox" data-route="inbox">My inbox <span id="inboxCount"></span></a>
+        <a href="#/incidents" data-route="incidents">Incidents</a>
+        <a href="#/batch" data-route="batch">Batch and SLA</a>
+        <a href="#/requests" data-route="requests">Service requests</a>
+        <a href="#/alerts" data-route="alerts">Alert stream</a>
+        <div class="nav-group">Service</div>
+        <a href="#/reports" data-route="reports">Reports</a>
+        <a href="#/knowledge" data-route="knowledge">Known errors and runbooks</a>
+        <a href="#/team" data-route="team">Agents and people</a>
+        <a href="#/audit" data-route="audit">Audit log</a>
+        <div class="nav-group">Demo</div>
+        <a href="#/simulator" data-route="simulator">Scenario simulator</a>
+      </nav>
+      <div class="sidebar-foot">
+        <button class="btn ghost small" id="themeToggle" title="Toggle theme">Theme</button>
+        <span id="version" class="muted small"></span>
+      </div>
+    </aside>
+    <div class="content">
+      <div class="clockbar" id="clockbar"></div>
+      <main id="main"><div class="loading">Loading…</div></main>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div></div></div>
+  <script src="/static/app.js?v=2.0.0"></script>
+</body>
+</html>

@@ -9,9 +9,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: node --check adef_operate/web/app.js
-      - run: python -m adef_operate.skills_check skills
+      - run: node --check operatewithai/web/app.js
       - run: pytest -q
-      - run: python -m adef_operate guardrails --profile example-a
-      - run: python -m adef_operate evals --profiles all --out evals-report
-      - run: python -m adef_operate shadow-rehearsal --profile example-b
+      - run: python -m operatewithai night --scenarios everything

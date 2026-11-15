@@ -1,0 +1,243 @@
+# Known Error Database and runbooks (SOPs). An entry is matched by error signature. The
+# Diagnosis Agent runs its checks (read-only) to confirm the cause; the Resolution Agent turns
+# its plan into steps, and people approve them according to the action catalogue.
+# Step kinds: action (from actions.yaml), manual (a person does it), verify (the agent
+# watches a check until it passes). Failed downstream jobs are restarted by a recovery step
+# that is added to every plan. Arguments may use {node}, {ci}, {host} from the alert.
+
+known_errors:
+  - id: KE0001
+    title: "GoldenGate replicat abends after a source DDL change (OGG-01296)"
+    tool: GoldenGate
+    tower: repl
+    signatures: ["OGG-01296"]
+    typical_fix_minutes: 40
+    cause: "A column was added on the Oracle source table but not on the Snowflake target, so the replicat cannot map the row."
+    checks:
+      - {probe: goldengate.process_report, args: {process: REP_SNF}, expect: {error_code: "OGG-01296"}, says: "The replicat stopped on a mapping error"}
+      - {probe: change.recent, args: {ci: ORAPRD_ERP}, expect: {change_found: true}, says: "An approved change touched the source shortly before"}
+      - {probe: snowflake.column_diff, args: {}, expect: {columns_missing_on_target: true}, says: "The target table lacks a source column"}
+    plan:
+      - {kind: action, action: snowflake.add_column_from_source, args: {table: RAW_ERP.GL_JE_LINES}, title: "Add the missing column to RAW_ERP.GL_JE_LINES (additive DDL)"}
+      - {kind: action, action: goldengate.start_process, args: {process: REP_SNF}, title: "Start replicat REP_SNF from its checkpoint"}
+      - {kind: verify, probe: goldengate.lag, args: {}, expect: {within_limit: true}, timeout: 60, title: "Replication lag is back under the limit"}
+    permanent_fix: "Add a schema-drift check to the ERP release checklist: compare source and target columns for replicated tables before the change window closes."
+
+  - id: KE0002
+    title: "Informatica session fails on a Db2 deadlock or lock timeout (SQL0911N)"
+    tool: Informatica
+    tower: etl
+    signatures: ["SQL0911N"]
+    typical_fix_minutes: 20
+    cause: "A Db2 housekeeping job (online REORG) held locks on the source table while the session was reading it. The condition clears when the job ends."
+    checks:
+      - {probe: informatica.session_log, args: {node: "{node}"}, expect: {has_sql0911: true}, says: "The session log shows SQL0911N, reason code 68"}
+      - {probe: db2.lock_events, args: {}, expect: {blocker_is_housekeeping: true}, says: "The lock holder was a housekeeping job, not a business transaction"}
+    plan:
+      - {kind: action, action: informatica.restart_workflow, args: {node: "{node}"}, title: "Restart the workflow in recovery mode"}
+      - {kind: verify, probe: batch.job_state, args: {node: "{node}"}, expect: {succeeded: true}, timeout: 90, title: "The workflow completes"}
+    permanent_fix: "Move HK_REORG_POLICY out of the batch window (22:00) or make the policy load depend on it in the scheduler."
+
+  - id: KE0003
+    title: "Oracle service account password expired (ORA-28001)"
+    tool: Oracle
+    tower: dba_oracle
+    signatures: ["ORA-28001"]
+    typical_fix_minutes: 35
+    cause: "The service account is on a profile with a password lifetime. When it expires, every tool that logs in with it fails at once."
+    checks:
+      - {probe: oracle.account_status, args: {account: SVC_DATA}, expect: {expired: true}, says: "DBA_USERS shows the account as EXPIRED"}
+      - {probe: goldengate.process_report, args: {process: EXT_ERP}, expect: {error_code: "OGG-00664"}, says: "The extract failed at logon with the same error"}
+    plan:
+      - {kind: action, action: oracle.unexpire_account, args: {account: SVC_DATA}, title: "Rotate the SVC_DATA password in the vault and reopen the account"}
+      - {kind: action, action: goldengate.start_process, args: {process: EXT_ERP}, title: "Start extract EXT_ERP from its checkpoint"}
+      - {kind: verify, probe: goldengate.lag, args: {}, expect: {within_limit: true}, timeout: 60, title: "Replication lag is back under the limit"}
+    permanent_fix: "Move service accounts to a profile without password expiry and rotate through the vault on a schedule; alert 14 days before any expiry."
+
+  - id: KE0004
+    title: "Snowflake warehouse suspended by its resource monitor"
+    tool: Snowflake
+    tower: snowdbt
+    signatures: ["SNOWFLAKE_RM_QUOTA"]
+    typical_fix_minutes: 25
+    cause: "The warehouse's resource monitor reached its monthly credit quota and suspended the warehouse."
+    checks:
+      - {probe: snowflake.resource_monitor, args: {warehouse: WH_TRANSFORM}, expect: {quota_exceeded: true}, says: "Used credits are over the quota; the top consumer is identified"}
+    plan:
+      - {kind: action, action: snowflake.raise_quota, args: {warehouse: WH_TRANSFORM, add_credits: 100}, title: "Raise RM_TRANSFORM by 100 credits to finish the month and resume WH_TRANSFORM"}
+      - {kind: verify, probe: snowflake.warehouse_state, args: {warehouse: WH_TRANSFORM}, expect: {started: true}, timeout: 15, title: "The warehouse is running"}
+    permanent_fix: "Give ad-hoc users their own warehouse with a statement timeout; notify at 80% of quota instead of only suspending at 100%."
+
+  - id: KE0005
+    title: "Vendor file contains duplicate rows (file twice the normal size)"
+    tool: MFT
+    tower: etl
+    signatures: ["MFT_SIZE_ANOMALY", "DBT_TEST_FAIL:unique_fct_claims_claim_id"]
+    typical_fix_minutes: 45
+    cause: "The vendor's export repeated the previous day's rows. Loading it doubles the day's claims and fails the uniqueness test."
+    checks:
+      - {probe: mft.file_status, args: {}, expect: {size_double: true}, says: "The file is about twice its 7-day average size"}
+    plan:
+      - {kind: action, action: informatica.reload_file_batch, args: {node: infa.wf_claims}, title: "Remove the repeated rows and load (or reload) the business date"}
+      - {kind: verify, probe: batch.job_state, args: {node: infa.wf_claims}, expect: {not_failed: true}, timeout: 30, title: "The claims load is healthy"}
+    permanent_fix: "Add a pre-load control: reject a file whose row count or checksum repeats the previous day's; ask the vendor for a trailer record."
+
+  - id: KE0006
+    title: "Power BI refresh fails: on-premises data gateway unreachable"
+    tool: Power BI
+    tower: cloud
+    signatures: ["DM_GWPipeline_Client_GatewayUnreachable", "DT_HOST_UNAVAILABLE:gw-az-01"]
+    typical_fix_minutes: 20
+    cause: "The gateway virtual machine is stopped, so the Power BI service cannot reach on-premises and Denodo sources."
+    checks:
+      - {probe: dynatrace.host, args: {host: gw-az-01}, expect: {available: false}, says: "Dynatrace reports the gateway host unavailable"}
+      - {probe: azure.vm_status, args: {host: gw-az-01}, expect: {vm_stopped: true}, says: "Azure shows the VM stopped after a failed guest update"}
+    plan:
+      - {kind: action, action: azure.restart_vm, args: {host: gw-az-01}, title: "Start the gateway VM gw-az-01"}
+      - {kind: verify, probe: dynatrace.host, args: {host: gw-az-01}, expect: {available: true}, timeout: 20, title: "The gateway host is available"}
+    permanent_fix: "Add a second gateway node to the cluster; move guest OS updates for gateway hosts out of the reporting window."
+
+  - id: KE0007
+    title: "Cognos reports fail: dispatcher cannot service the request (DPR-ERR-2109)"
+    tool: Cognos
+    tower: bi
+    signatures: ["DPR-ERR-2109"]
+    typical_fix_minutes: 25
+    cause: "Hung batch report processes fill the report service, so new report requests are refused."
+    checks:
+      - {probe: cognos.dispatcher_status, args: {}, expect: {report_service_saturated: true}, says: "All batch report processes are busy and several are hung"}
+    plan:
+      - {kind: action, action: cognos.restart_report_service, args: {}, title: "Restart the Cognos batch report service"}
+      - {kind: verify, probe: cognos.dispatcher_status, args: {}, expect: {report_service_saturated: false}, timeout: 15, title: "Report processes are available"}
+    permanent_fix: "Set a maximum execution time for batch reports and review the three reports that hang; raise with the report owners."
+
+  - id: KE0008
+    title: "Informatica server slow: CPU saturated by a process outside its window"
+    tool: Dynatrace
+    tower: cloud
+    signatures: ["DT_CPU_SATURATION:infa-prd-01"]
+    typical_fix_minutes: 20
+    cause: "A backup agent is running on the Informatica host during the batch and takes most of the CPU."
+    checks:
+      - {probe: dynatrace.host, args: {host: infa-prd-01}, expect: {cpu_saturated: true, backup_agent_running: true}, says: "CPU is saturated and the top process is the backup agent"}
+    plan:
+      - {kind: action, action: infra.stop_process, args: {host: infa-prd-01, process: bkagent}, title: "Stop the backup agent on infa-prd-01 (it restarts in its own window)"}
+      - {kind: verify, probe: dynatrace.host, args: {host: infa-prd-01}, expect: {cpu_saturated: false}, timeout: 15, title: "CPU is back to normal"}
+    permanent_fix: "Correct the backup schedule for infa-prd-01 and add a Dynatrace maintenance rule so it cannot start between 00:00 and 07:00."
+
+  - id: KE0009
+    title: "Vendor file missed its cutoff"
+    tool: MFT
+    tower: integ
+    signatures: ["MFT_FILE_MISSING"]
+    typical_fix_minutes: 120
+    cause: "The vendor has not delivered the file. Nothing is broken on the client side; the load waits for the file."
+    checks:
+      - {probe: mft.file_status, args: {}, expect: {missing: true}, says: "No file for the business date on the gateway"}
+    plan:
+      - {kind: manual, title: "Call the vendor's operations desk and get a delivery time", guidance: "Contact is in the vendor runbook. Record the time they commit to; the Batch and SLA Agent re-plans with it."}
+      - {kind: verify, probe: mft.file_status, args: {}, expect: {missing: false}, timeout: 300, title: "The file arrives (the load starts by itself)"}
+    permanent_fix: "Agree a delivery SLA and an automatic late-file notice with the vendor."
+
+  # ---- generic symptoms: only become their own incident when no upstream cause is open
+  - id: KE0010
+    title: "dbt source freshness failed: upstream data is late"
+    tool: dbt
+    tower: snowdbt
+    symptom: true
+    signatures: ["DBT_STALE_SOURCE"]
+    typical_fix_minutes: 45
+    cause: "A source table was not loaded in time, so dbt skipped the models that depend on it."
+    checks:
+      - {probe: dbt.failed_results, args: {}, expect: {has_stale_source: true}, says: "Models were skipped because a source is stale"}
+    plan:
+      - {kind: manual, title: "Find out why the source load is late and fix it", guidance: "Check the load that feeds the stale source: Informatica workflow monitor or GoldenGate lag."}
+    permanent_fix: ""
+
+  - id: KE0011
+    title: "GoldenGate replication lag over the limit"
+    tool: GoldenGate
+    tower: repl
+    symptom: true
+    signatures: ["OGG_LAG"]
+    typical_fix_minutes: 45
+    cause: "Replication is behind. Usually a stopped process, a long source transaction or a slow target."
+    checks:
+      - {probe: goldengate.lag, args: {}, expect: {within_limit: false}, says: "Lag is over the agreed limit"}
+    plan:
+      - {kind: manual, title: "Investigate the lag", guidance: "INFO ALL, LAG <group>, SEND <group> STATUS; check for long transactions with SHOWTRANS."}
+    permanent_fix: ""
+
+  # ---- reference entries: recognised on sight, worked by the engineer with this guidance
+  - id: KE0101
+    title: "ORA-01555 snapshot too old during extract"
+    tool: Oracle
+    tower: dba_oracle
+    signatures: ["ORA-01555"]
+    cause: "A long-running read needs undo that has been overwritten. Common when a big extract overlaps heavy posting."
+    plan:
+      - {kind: manual, title: "Check undo retention and the query's run time; rerun outside the posting peak", guidance: "V$UNDOSTAT (MAXQUERYLEN, TUNED_UNDORETENTION). Do not raise UNDO_RETENTION without the DBA lead."}
+    permanent_fix: "Split the extract by date range or move it off the posting peak."
+  - id: KE0102
+    title: "ORA-01653 unable to extend table (tablespace full)"
+    tool: Oracle
+    tower: dba_oracle
+    signatures: ["ORA-01653", "ORA-01654"]
+    cause: "The tablespace has no free extent and cannot autoextend."
+    plan:
+      - {kind: manual, title: "Add space under the DBA lead's approval, then restart the failed load", guidance: "DBA_FREE_SPACE, DBA_DATA_FILES (AUTOEXTENSIBLE, MAXBYTES). Adding a datafile is a DBA change."}
+    permanent_fix: "Tablespace growth forecast and alert at 85%."
+  - id: KE0103
+    title: "GoldenGate extract cannot find an archived log (OGG-00446 / OGG-01028)"
+    tool: GoldenGate
+    tower: repl
+    signatures: ["OGG-00446", "OGG-01028"]
+    cause: "The extract needs a redo or archive log that RMAN has already deleted."
+    plan:
+      - {kind: manual, title: "Restore the missing archive log sequence, then start the extract", guidance: "INFO EXTRACT <group>, SHOWCH for the recovery checkpoint; the DBA restores the sequence with RMAN. Never reposition past it: that loses transactions."}
+    permanent_fix: "RMAN deletion policy must respect the extract (REGISTER EXTRACT LOGRETENTION)."
+  - id: KE0104
+    title: "GoldenGate TCP/IP error between pump and target (OGG-01224)"
+    tool: GoldenGate
+    tower: repl
+    signatures: ["OGG-01224"]
+    cause: "The pump cannot reach the target manager or collector: network, firewall or the target manager is down."
+    plan:
+      - {kind: manual, title: "Check the target manager and the network path, then start the pump", guidance: "INFO MANAGER on the target; test the port from the source. The pump resumes from its checkpoint."}
+    permanent_fix: "AUTORESTART for pumps with a retry limit."
+  - id: KE0105
+    title: "Db2 tablespace full (SQL0289N)"
+    tool: IBM Db2
+    tower: dba_db2
+    signatures: ["SQL0289N"]
+    cause: "No new pages can be allocated in the tablespace."
+    plan:
+      - {kind: manual, title: "Extend the tablespace or its storage path under DBA approval, then restart the load", guidance: "MON_GET_TABLESPACE (TBSP_UTILIZATION_PERCENT); automatic storage: check the storage group paths."}
+    permanent_fix: "Utilisation alert at 85% in Dynatrace."
+  - id: KE0106
+    title: "Snowflake statement reached its timeout (000630)"
+    tool: Snowflake
+    tower: snowdbt
+    signatures: ["000630", "STATEMENT_TIMEOUT"]
+    cause: "A query ran longer than STATEMENT_TIMEOUT_IN_SECONDS, often after a data volume jump or a lost clustering benefit."
+    plan:
+      - {kind: manual, title: "Read the query profile; retry on a larger warehouse only with the SDM's cost approval", guidance: "QUERY_HISTORY for the query id: spilling, exploding joins, partitions scanned."}
+    permanent_fix: "Fix the model (incremental filter, join keys) rather than raising the timeout."
+  - id: KE0107
+    title: "Power BI refresh fails: data source credentials expired"
+    tool: Power BI
+    tower: bi
+    signatures: ["DM_GWPipeline_Gateway_DataSourceAccessError", "AADSTS7000222"]
+    cause: "The stored credential or the service principal's client secret for the data source has expired."
+    plan:
+      - {kind: manual, title: "Renew the credential under the security lead's approval, update it on the gateway data source, then refresh", guidance: "AADSTS7000222 means the app registration's client secret expired: rotate it in Entra ID and the vault."}
+    permanent_fix: "Track secret expiry dates; alert 30 days before."
+  - id: KE0108
+    title: "Cognos report fails on the data source (QE-DEF-0285 / XQE-DAT-0001)"
+    tool: Cognos
+    tower: bi
+    signatures: ["QE-DEF-0285", "XQE-DAT-0001"]
+    cause: "The report's query failed at the database: object missing or renamed, sign-on invalid, or the source is down."
+    plan:
+      - {kind: manual, title: "Test the data source connection and sign-on; check the package against the mart", guidance: "Cognos Administration > Data Source Connections > Test. Compare the failing query subject with the dbt model's current columns."}
+    permanent_fix: "Contract test between dbt marts and Cognos packages in the release pipeline."
