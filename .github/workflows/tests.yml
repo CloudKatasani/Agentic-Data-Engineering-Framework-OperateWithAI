@@ -9,6 +9,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - run: node --check adef_operate/web/app.js
       - run: python -m adef_operate.skills_check skills
       - run: pytest -q
       - run: python -m adef_operate guardrails --profile example-a

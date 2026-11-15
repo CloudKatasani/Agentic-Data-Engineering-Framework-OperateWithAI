@@ -12,7 +12,7 @@ and Knowledge.
 
 ## Status
 
-All ten days of the plan are built and tested: Epics O1, O2 and O4, O3-1, O3-3 and O3-4,
+All ten days of the plan and the section 11 API and console are built and tested: Epics O1, O2 and O4, O3-1, O3-3 and O3-4,
 O5-1 and O5-2, and the shadow-mode machinery and go-live rule for O5-3 and O5-4. Telemetry
 translators exist for every tool in Build-With-AI's preset Stack Profiles (O3-2 is partly
 done; live API clients are pending). The real two-week shadow period starts once a real
@@ -36,6 +36,52 @@ All six Build presets bind out of the box:
 Signals, cases, monitoring specs and runbooks speak logical names and slots only. Moving
 a live product to another profile changes none of them (O3-4). See [`BUILD_STATUS.md`](BUILD_STATUS.md) for the backlog item by item, the guardrail
 scenarios already covered, the assumptions made, and what comes next.
+
+## Console and API (section 11)
+
+```bash
+./run.sh --demo --profile example-b
+```
+
+Then open http://127.0.0.1:8090/. The console has these views:
+
+| View | What it shows |
+|---|---|
+| Fleet health | Every product: mode, trust status, open cases by severity, findings, OG1, today's budgets, items waiting on a person. Includes the emergency stop. |
+| Case room | Lifecycle, timeline, impact, signals with Sentinel labels, metadata-only evidence, hypotheses with for and against, options ranked by safety, approvals, council of three, verification, confirmed cause, post-incident note. |
+| Service page | Autonomy ladder (stored against effective level, with the reason and track record), monitors, runbook, readiness, health summary, stack binding, escalations, the Demo Simulator controls, and "Ask the Commander". |
+| FinOps | Latest review, findings with the saving arithmetic, savings ledger. |
+| Governance | Each control as matching, drifted, waived or not verifiable; drift findings; the evidence pack. |
+| Learning | Problems, evaluation replays and accuracy, platform track record, noise report, autonomy and tuning proposals. |
+| Approvals | Every open gate request across the fleet. Only the named holder of a role can decide; agents never can. |
+| Onboard | Release a golden product (Demo Simulator), or a real product in shadow mode from exports. |
+
+The API follows OPERATE_SPEC section 11 exactly. Interactive docs are at `/docs`.
+
+| Method and path | Purpose |
+|---|---|
+| `POST /ops/services` | Onboard from a handover pack (`mode: demo` or `shadow`) |
+| `GET /ops/services/{dp}` | Service definition, health, autonomy levels |
+| `POST /ops/signals` | Ingest (collector and Consume events); `?process=true` groups and routes |
+| `GET /ops/cases`, `GET /ops/cases/{id}` | Queue (filters `dp`, `state`, `severity`, `type`) and case detail with evidence |
+| `POST /ops/cases/{id}/approvals` | Decide a gate request (named human only) |
+| `POST /ops/simulate/faults` | Inject a fault (Demo Simulator products only) |
+| `GET /ops/finops/{dp}`, `GET /ops/governance/{dp}` | Reviews and findings |
+| `POST /ops/stop` (and `DELETE /ops/stop` to lift it) | Emergency stop, global or per product |
+
+Supporting endpoints sit under the same prefix: case steps, onboarding, ticks, the approvals
+inbox, learning actions, the request desk and the shadow report.
+
+**Security** follows Build-With-AI's console. The server refuses to listen beyond
+localhost without one of these:
+
+- `ADEF_API_TOKEN`: one shared bearer token.
+- `ADEF_IDENTITY_FILE`: a YAML map of `sha256(token)` to a person's name. Each person
+  uses their own token, and the API lets them decide, review, confirm or stop only as
+  themselves. The engine still checks that they hold the role.
+
+Guard refusals come back as `409` with `guardrail: true` and the reason. A wrong or agent
+approver gets `403`.
 
 ## Quick start
 
@@ -116,7 +162,9 @@ adef_operate/
     onboarding_tools.py  draft service files, dry run and fault proofs for OG1
   connectors/  adapter contract (operate section) and the Demo Simulator with faults F-01 to F-08
   packs/       synthetic Utilities and Telco Domain Packs and golden handover packs
-  api/         (next: section 11 endpoints)
+  api/         fleet.py (service layer) and app.py (section 11 REST API, FastAPI)
+  web/         console: index.html, app.js (dependency-free), operate.css; styles.css and the
+               Carlito font are shared with Build-With-AI
 skills/        eight SKILL.md contracts (validated by adef_operate.skills_check)
-tests/         foundation, control, signals, day 6 to day 10, skills
+tests/         foundation, control, signals, day 6 to day 10, API and console, skills
 ```

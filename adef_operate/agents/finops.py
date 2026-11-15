@@ -81,7 +81,8 @@ class FinOpsAgent:
         for obj in self.unused_objects(usage_signals):
             findings.append(self._unused_finding(obj))
 
-        opened = [self._raise(f) for f in findings]
+        raised = [self._raise(f) for f in findings]
+        opened = [r for r in raised if not r.get("duplicate_of_open_finding")]
         lines = [f"# FinOps review - {self.ws.dp_id} - {period}", "",
                  "| Item | Estimate | Actual | Variance | Variance % |", "|---|---|---|---|---|",
                  f"| Product total (daily) | {money(est)} | {money(total)} | {money(var)} | {pct:+.1f}% |", "",
@@ -137,7 +138,19 @@ class FinOpsAgent:
                 "reversibility": "Irreversible after the retention of the backup", "action_class": "A3 drop_object at OG4",
                 "executor": "Platform team", "trade_off": False}
 
+    def _open_duplicate(self, f: dict) -> Optional[str]:
+        for c in self.cases.all():
+            if c.type == "FIN" and c.state not in ("closed",) and c.decision is None \
+                    and c.timeline and c.timeline[0].event == f["title"]:
+                return c.id
+        return None
+
     def _raise(self, f: dict) -> dict:
+        dup = self._open_duplicate(f)
+        if dup:  # one finding per cause: an open finding is not raised again
+            from ..engine.approvals import Approvals
+            req = next((r["id"] for r in Approvals(self.ws)._records("request") if r.get("case_id") == dup), None)
+            return {"id": dup, "approval": req, "duplicate_of_open_finding": True, **f}
         related = [c for c in self.cases.open_cases("INC")
                    if c.first_failing_object == f["object"] or f["object"] in
                    self.lineage.neighbourhood([c.first_failing_object or ""])]

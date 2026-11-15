@@ -1,0 +1,37 @@
+/* Operate-specific additions on top of the shared Build-With-AI styles. */
+.sev { font-weight: 700; }
+.sev-S1 { background: var(--bad-bg); color: var(--bad); }
+.sev-S2 { background: var(--warn-bg); color: var(--warn); }
+.sev-S3 { background: var(--info-bg); color: var(--info); }
+.sev-S4 { background: var(--panel-2); color: var(--muted); }
+.trust-do-not-use { background: var(--bad-bg); color: var(--bad); }
+.trust-degraded { background: var(--warn-bg); color: var(--warn); }
+.trust-trusted { background: var(--ok-bg); color: var(--ok); }
+.ladder { display: grid; grid-template-columns: 210px repeat(4, minmax(52px, 1fr)) minmax(0, 2fr); gap: 4px; align-items: center; font-size: 12.5px; }
+.ladder .lv { text-align: center; border: 1px solid var(--border); border-radius: 6px; padding: 3px 0; color: var(--muted); }
+.ladder .lv.cap { border-style: dashed; }
+.ladder .lv.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.ladder .lv.stored { background: var(--accent-2); color: var(--accent); border-color: var(--accent); }
+.ladder .lv.off { opacity: .35; }
+.ladder .hd { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+.timeline { border-left: 2px solid var(--border); margin-left: 6px; padding-left: 14px; font-size: 13px; }
+.timeline .ev { position: relative; padding: 4px 0 8px; }
+.timeline .ev::before { content: ""; position: absolute; left: -20px; top: 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--border); }
+.timeline .ev.tr::before { background: var(--accent); }
+.timeline .ev .by { font-weight: 600; }
+.timeline .ev .ts { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.lifecycle { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 14px; }
+.lifecycle .st { display: inline-block; line-height: 18px; white-space: nowrap; font-size: 11.5px; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); }
+.lifecycle .st.done { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+.lifecycle .st.now { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
+.lifecycle .st.bad { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
+.stopbar { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mode-shadow { background: var(--violet-bg); color: var(--violet); }
+.mode-live { background: var(--ok-bg); color: var(--ok); }
+.mode-demo { background: var(--info-bg); color: var(--info); }
+.lbl-primary { color: var(--accent); font-weight: 600; }
+.lbl-downstream-echo, .lbl-duplicate { color: var(--muted); }
+.hyp-supported { color: var(--ok); font-weight: 600; }
+.hyp-refuted { color: var(--bad); }
+.hyp-unsupported, .hyp-inconclusive { color: var(--muted); }
+.desk { display: grid; grid-template-columns: 1fr auto; gap: 8px; }

@@ -35,7 +35,7 @@ connected (step 4). Every action type starts at L1 (step 5).
 | O5-2 | Guardrail set (section 13.2) | Done (Day 9): 16 of 16, scripted and repeatable on any profile | `test_o52_guardrail_scenario[OT-01..OT-16]`; `python -m adef_operate guardrails --profile <id>` |
 | O5-3 | Shadow mode on a real non-production product for two weeks | Machinery done (Day 10): shadow mode, START HERE intake, read-only export adapter, the team's conclusions, report. Rehearsed for 14 days on synthetic exports. **The real two weeks start when a real product's exports and START HERE answers arrive.** | `tests/test_day10.py`; `python -m adef_operate shadow-rehearsal` |
 | O5-4 | Go or no-go against section 13.3 | Rule enforced (Day 10): `shadow_report` decision; OG7 go-live request tied to the report hash; no promotion above L1 before an approved go-live; synthetic periods refused | `test_go_live_rule_enforced`, `test_synthetic_rehearsal_cannot_request_go_live` |
-| Section 11 | API and console | Not started | - |
+| Section 11 | API and console | Done: all nine endpoints at the specified paths; the six console views plus approvals and onboarding | `tests/test_api.py`; console driven headless in Chromium (every view, a case flow, an agent-identity refusal, phone width) |
 
 **Day 2-3 exit check** (OT-01, OT-04, OT-11, OT-12, OT-15): all pass.
 **Day 4-5 exit check** (all eight faults raise the right signals): passes on both packs.
@@ -266,6 +266,21 @@ the read-only source for each file on each tool).
 and rehearsed. Onboarding a real product needs your exports and START HERE answers, which
 are not available in this environment.
 
+## Section 11: API and console
+
+- **Stack, matching Build-With-AI.** FastAPI and uvicorn, plus a dependency-free single-page console that reuses Build's stylesheet and Carlito font, so the two consoles read as one product. `python -m adef_operate serve` (or `./run.sh`) starts it, and `--demo` seeds both golden products to OG1.
+- **One service layer** (`api/fleet.py`). The HTTP layer adds only transport, authentication and identity binding; every guard is the engine's own. Specifically:
+  - council before S1 options;
+  - named-human approvals;
+  - shadow-mode caps;
+  - simulated faults only on Demo Simulator products;
+  - case close guards.
+- **Endpoints.** The section 11 table, plus case steps (diagnose, options, act, verify, council, confirm cause, post-incident, close), "I ran it" for L1 actions, onboarding, ticks, the approvals inbox, learning actions (noise report, autonomy and tuning proposals), the request desk, the shadow report, and lifting a stop.
+- **Identity.** An optional `ADEF_IDENTITY_FILE` binds each token to one person. Without it the approver is the name given, still checked against the role holder, and agents are always refused.
+- **Two defects found while driving the console, now fixed with tests:**
+  - A cost group that kept firing was re-routed on every tick, so FinOps raised a duplicate finding each time. The Commander now routes a group once, and FinOps never re-raises an open finding.
+  - The approvals form prefilled the last name typed instead of the role's named holder.
+
 ## Assumptions made during the build (please confirm)
 
 | # | Assumption | Where |
@@ -300,6 +315,9 @@ are not available in this environment.
 | A28 | Shadow mode still escalates a suspected security event to Security and Compliance. Everything else outward-facing is recorded as "would do". | `agents/commander.py` |
 | A29 | In shadow mode, recovery is observed when every detecting monitor passes on a later snapshot. It counts no attempt and executes nothing. | `shadow_mode.py` |
 | A30 | The first real product is reached through read-only metadata exports rather than live API access, so Operate holds no credentials during shadow mode. Live API clients come with go-live. | `stack/export.py` |
+| A31 | A case ID is unique per product. `GET /ops/cases/{id}` resolves it across the fleet and asks for `?dp=` when two products share the ID (409). | `api/fleet.py` |
+| A32 | Demo Simulator state is kept outside the ops workspaces (`<home>/demo-sim/`) and restored on restart. Real products never have simulator state. | `api/fleet.py` |
+| A33 | Lifting an emergency stop is a person's action, recorded in every affected product's escalation log. It needs no gate (stopping is the safe direction). | `api/fleet.py` |
 
 ## Next
 
@@ -307,8 +325,7 @@ The ten-day plan is complete apart from the real shadow period itself.
 
 1. **Start the real shadow period (O5-3).** This needs your START HERE answers, the handover pack for a non-production product, and daily exports. Then run two weeks and review the report.
 2. **Live API clients (O3-2) for the chosen profile**, each with its conformance test. These are only needed after go-live.
-3. **Section 11 API and console.**
-4. **Model-backed reasoner** behind the Diagnosis `Reasoner` seam. Measure it against the rule reasoner on the shadow replays before switching.
+3. **Model-backed reasoner** behind the Diagnosis `Reasoner` seam. Measure it against the rule reasoner on the shadow replays before switching.
 
 ## Open questions (START HERE FIRST)
 

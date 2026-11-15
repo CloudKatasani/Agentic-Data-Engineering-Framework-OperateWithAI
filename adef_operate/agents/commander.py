@@ -172,8 +172,16 @@ class CommanderAgent:
         outcome["next_action"] = next_action
         return outcome
 
+    def _already_routed(self, group_id: str, day: str) -> bool:
+        path = f"health/routes-{day}.jsonl"
+        return self.ws.has(path) and any(json.loads(l).get("group") == group_id
+                                         for l in self.ws.read(path).splitlines() if l.strip())
+
     def _route(self, g: dict, day: str) -> dict:
         owner = ROUTES[g["family"]]
+        if self._already_routed(g["id"], day):
+            # Repeats of a routed group are duplicates (labelled by the Sentinel); route once.
+            return {"group": g["id"], "outcome": "already-routed", "routed_to": owner}
         record = {"group": g["id"], "routed_to": owner, "objects": g["objects"]}
         if g["family"] == "access":
             # Deliberate exception to shadow mode: a suspected security event always reaches

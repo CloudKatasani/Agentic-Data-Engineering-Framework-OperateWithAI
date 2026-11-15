@@ -9,6 +9,7 @@ then diagnoses each group.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -102,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("evals", help="run the replay harness over the fault library")
     e.add_argument("--profiles", default="canonical", help="comma list, or 'all'")
     e.add_argument("--out", type=Path, default=None)
+    sv = sub.add_parser("serve", help="run the section 11 API and the web console")
+    sv.add_argument("--home", type=Path, default=None, help="ADEF_HOME (default: $ADEF_HOME or ~/.adef)")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8090)
+    sv.add_argument("--demo", action="store_true", help="seed both golden products to OG1 (Demo Simulator)")
+    sv.add_argument("--profile", default=None, help="Stack Profile for --demo")
     t = sub.add_parser("start-here", help="write the START HERE answers template")
     t.add_argument("--dp", default="<dp_id>")
     t.add_argument("--profile", default="<stack profile id>")
@@ -136,6 +143,21 @@ def main(argv: list[str] | None = None) -> int:
     cc.add_argument("--real", choices=["yes", "no"])
     cc.add_argument("--minutes", type=float)
     args = ap.parse_args(argv)
+    if args.cmd == "serve":
+        import uvicorn
+        from .api.app import create_app, seed_demo
+        from .engine.workspace import adef_home
+        home = args.home or adef_home()
+        if args.demo:
+            seeded = seed_demo(home, args.profile)
+            print(f"Demo Simulator products ready: {seeded or 'already present'}")
+        if args.host not in ("127.0.0.1", "localhost") and not (os.environ.get("ADEF_API_TOKEN")
+                                                                 or os.environ.get("ADEF_IDENTITY_FILE")):
+            print("Refusing to listen beyond localhost without ADEF_API_TOKEN or ADEF_IDENTITY_FILE.")
+            return 2
+        print(f"Console: http://{args.host}:{args.port}/   API docs: http://{args.host}:{args.port}/docs   home: {home}")
+        uvicorn.run(create_app(home), host=args.host, port=args.port, log_level="warning")
+        return 0
     if args.cmd == "start-here":
         from .engine.shadow import start_here_template
         text = start_here_template(args.dp, args.profile)
