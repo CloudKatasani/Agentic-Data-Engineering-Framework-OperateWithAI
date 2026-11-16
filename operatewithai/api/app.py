@@ -14,6 +14,7 @@ Security, same convention as Build-With-AI:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets as pysecrets
 import threading
@@ -29,6 +30,9 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__
 from ..agents import llm, reporting, team
 from ..engine.ops import Refused
+from ..llm import router
+from ..llm.catalog import FUNCTIONS, PROVIDERS, RULES_ONLY
+from ..llm.providers import LLMError
 from ..service import Service
 from ..sim.scenarios import BY_ID, PRESETS, SCENARIOS
 from . import pipeline
@@ -111,7 +115,7 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
     @app.get("/api/meta")
     def meta(request: Request):
         env = svc.env
-        return {"version": __version__, "client": env.client, "me": request.state.actor, "llm_assist": llm.enabled(),
+        return {"version": __version__, "client": env.client, "me": request.state.actor, 
                 "people": [{**p, "tower_name": env.tower_name(p["tower"]) if p.get("tower") else "", "role_text": env.data["roles"].get(p.get("role", ""), "")}
                            for p in env.people],
                 "towers": env.data["towers"], "scenarios": SCENARIOS, "presets": PRESETS, "running": svc.scenarios,
@@ -194,12 +198,12 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
                 "requests": list(kb.requests.values())}
 
     @app.get("/api/reports/{name}")
-    def report(name: str):
+    def report(name: str, summary: bool = False):
         o = ops()
         if name == "health":
             return reporting.health(o)
         if name == "handover":
-            return {"markdown": reporting.handover(o)}
+            return {"markdown": reporting.handover(o, with_summary=summary), "summary_available": router.enabled("reporting.handover_summary")}
         if name == "review":
             return reporting.review(o)
         raise KeyError(name)
@@ -250,6 +254,102 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
             raise HTTPException(422, "Write a comment first.")
         svc.comment(tid, actor(request), str(body["text"]).strip()[:2000])
         return {"ok": True}
+
+    # ------------------------------------------------------------------ AI models
+    @app.get("/api/models")
+    def models():
+        data = router.load()
+        return {"providers": [router.provider_status(p, data) for p in PROVIDERS],
+                "functions": [{**{k: f[k] for k in ("id", "agent", "title", "does", "guard")}, **router.function_config(f["id"], data),
+                               "usage": router.usage.get(f["id"])} for f in FUNCTIONS],
+                "rules_only": [{"agent": a, "why": w} for a, w in RULES_ONLY]}
+
+    @app.put("/api/models/functions/{fid}")
+    def set_function(fid: str, body: dict = Body(...)):
+        if fid not in {f["id"] for f in FUNCTIONS}:
+            raise KeyError(fid)
+        if body.get("provider") not in PROVIDERS:
+            raise HTTPException(422, "Choose one of the listed providers.")
+        if not str(body.get("model", "")).strip():
+            raise HTTPException(422, "Give a model id.")
+        data = router.load()
+        data["functions"][fid] = {"enabled": bool(body.get("enabled")), "provider": body["provider"], "model": str(body["model"]).strip()[:120]}
+        router.save(data)
+        ops().audit("Service", f"Model setting changed: {fid}", "", f"{'on' if body.get('enabled') else 'off'}, {body['provider']} / {body['model']}")
+        return router.function_config(fid)
+
+    @app.put("/api/models/providers/{pid}")
+    def set_provider(pid: str, body: dict = Body(...)):
+        if pid not in PROVIDERS:
+            raise KeyError(pid)
+        url = str(body.get("base_url", "")).strip()
+        if url and not url.startswith(("http://", "https://")):
+            raise HTTPException(422, "The base URL must start with http:// or https://")
+        data = router.load()
+        data["providers"][pid] = {"base_url": url[:300], "options": {str(k): str(v)[:60] for k, v in (body.get("options") or {}).items()}}
+        router.save(data)
+        return router.provider_status(pid)
+
+    @app.post("/api/models/providers/{pid}/test")
+    def test_provider(pid: str, body: dict = Body(...)):
+        """One very small real call to check the key and the model. Costs a few tokens."""
+        if pid not in PROVIDERS:
+            raise KeyError(pid)
+        try:
+            res = router.provider(pid).complete(system="You are a connectivity check.", prompt="Reply with the single word: ready",
+                                                model=str(body.get("model", "")), max_tokens=32)
+            return {"ok": True, "model": res.model, "answer": res.text.strip()[:80]}
+        except LLMError as e:
+            return {"ok": False, "error": str(e)}
+
+    @app.get("/api/models/providers/{pid}/discover")
+    def discover(pid: str):
+        if pid not in PROVIDERS:
+            raise KeyError(pid)
+        try:
+            return {"ok": True, "models": router.provider(pid).list_models()[:200]}
+        except LLMError as e:
+            return {"ok": False, "error": str(e), "models": []}
+
+    # ------------------------------------------------------------------ integration endpoints
+    @app.get("/api/integrations")
+    def integrations(request: Request):
+        saved = router.load()["integrations"]
+        base = str(request.base_url).rstrip("/")
+        out = []
+        for t in ops().kb.endpoints:
+            cfg = saved.get(t["id"], {})
+            out.append({"id": t["id"], "tool": t["tool"], "connect": {**t["connect"], "endpoint": cfg.get("endpoint", ""),
+                                                                          "credential_ref": cfg.get("credential", t["connect"]["credential"]),
+                                                                          "enabled": bool(cfg.get("enabled"))},
+                        "inbound": [{**e, "url": f"{base}/api/ingest/{e['id']}", "received": svc.received.get(e["id"])} for e in t["inbound"]]})
+        return {"tools": out, "token_required": bool(token or ids)}
+
+    @app.put("/api/integrations/{tool}")
+    def set_integration(tool: str, body: dict = Body(...)):
+        if tool not in {t["id"] for t in ops().kb.endpoints}:
+            raise KeyError(tool)
+        data = router.load()
+        data["integrations"][tool] = {"endpoint": str(body.get("endpoint", "")).strip()[:300], "credential": str(body.get("credential", "")).strip()[:80],
+                                      "enabled": bool(body.get("enabled"))}
+        router.save(data)
+        ops().audit("Service", f"Integration settings changed: {tool}", "", data["integrations"][tool]["endpoint"])
+        return data["integrations"][tool]
+
+    @app.post("/api/ingest/{source}")
+    async def ingest(source: str, request: Request):
+        """Receive data from a tool in its own format (JSON, or text for log lines)."""
+        raw = await request.body()
+        if len(raw) > 512_000:
+            raise HTTPException(413, "Payload too large (512 KB limit per call).")
+        text = raw.decode("utf-8", "replace")
+        payload: Any = text
+        if "json" in request.headers.get("content-type", ""):
+            try:
+                payload = json.loads(text)
+            except ValueError:
+                raise HTTPException(422, "The body is not valid JSON.")
+        return svc.ingest(source, payload)
 
     # ------------------------------------------------------------------ simulator
     @app.get("/api/run")

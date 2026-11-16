@@ -14,8 +14,8 @@ from typing import Any
 
 from ..env import Environment
 
-CODE_RE = re.compile(r"\b(ORA-\d{5}|OGG-\d{5}|SQL\d{4}N|[A-Z]{2,4}_\d{4,5}|[A-Z]{3}-[A-Z]{3}-\d{4}|AADSTS\d{5,7})\b")
-ORDER = ["oracle", "db2", "dynatrace", "snowflake", "mft", "goldengate_log", "goldengate", "informatica", "dbt", "denodo", "powerbi", "cognos"]
+CODE_RE = re.compile(r"\b(ORA-\d{5}|OGG-\d{5}|SQL\d{4}N|[A-Z]{2,4}_\d{4,5}|[A-Z]{2,3}-[A-Z]{3}-\d{4}|AADSTS\d{5,7}|000\d{3})\b")
+ORDER = ["servicenow_change", "oracle", "oracle_alert", "db2", "dynatrace", "aws", "azure", "snowflake", "mft", "goldengate_log", "goldengate", "informatica", "dbt", "denodo", "powerbi", "cognos"]
 
 
 def codes_in(text: str) -> list[str]:
@@ -198,7 +198,51 @@ def oracle(env, snap: dict) -> list[dict]:
     return out
 
 
-PARSERS = {"goldengate_log": goldengate_log, "goldengate": goldengate, "informatica": informatica, "dbt": dbt, "powerbi": powerbi,
+def oracle_alert(env, line: str) -> list[dict]:
+    codes = codes_in(line)
+    if not codes:
+        return []
+    return [_alert("oracle", "ORAPRD_ERP", codes[0], "alert_log", "critical", " ".join(line.split()[1:]) or line, codes, node="ora.erp")]
+
+
+def db2(env, rec: dict) -> list[dict]:
+    msg = str(rec.get("message", ""))
+    codes = codes_in(msg)
+    if str(rec.get("level", "")).lower() not in ("error", "severe", "critical") or not codes:
+        return []
+    return [_alert("db2", "DB2PRD_POL", codes[0], "db2diag", "critical", " ".join(msg.split()), codes, node="db2.policy")]
+
+
+def _host_alert(env, source: str, host: str, title: str, firing: bool, detail: str) -> list[dict]:
+    ci = next((c["id"] for c in env.cis.values() if c.get("host") == host), None)
+    if not ci:
+        return []
+    key = "HOST_ALARM"
+    return [_alert(source, ci, host, key, "critical", f"{title} on {host}: {detail}", [key, f"{key}:{host}"], facts={"host": host}, clear=not firing)]
+
+
+def aws(env, alarm: dict) -> list[dict]:
+    dims = (alarm.get("Trigger") or {}).get("Dimensions") or []
+    host = next((d.get("value") for d in dims if d.get("value")), "")
+    return _host_alert(env, "aws", host, f"CloudWatch alarm {alarm.get('AlarmName', '')}", alarm.get("NewStateValue") == "ALARM", alarm.get("NewStateReason", ""))
+
+
+def azure(env, alert: dict) -> list[dict]:
+    e = (alert.get("data") or {}).get("essentials") or {}
+    host = (e.get("configurationItems") or [""])[0]
+    return _host_alert(env, "azure", host, f"Azure Monitor alert {e.get('alertRule', '')}", e.get("monitorCondition") == "Fired", e.get("description", ""))
+
+
+def servicenow_change(env, chg: dict) -> list[dict]:
+    """An approved change joins the change calendar; alerts on that system inside the window are then suppressed."""
+    if chg.get("cmdb_ci") in env.cis and not any(c["id"] == chg.get("number") for c in env.data["changes"]):
+        env.data["changes"].append({"id": chg["number"], "ci": chg["cmdb_ci"], "summary": chg.get("short_description", ""),
+                                    "window_start": chg["start_date"], "window_end": chg["end_date"], "requested_by": chg.get("requested_by", "")})
+    return []
+
+
+PARSERS = {"oracle_alert": oracle_alert, "db2": db2, "aws": aws, "azure": azure, "servicenow_change": servicenow_change,
+           "goldengate_log": goldengate_log, "goldengate": goldengate, "informatica": informatica, "dbt": dbt, "powerbi": powerbi,
            "cognos": cognos, "denodo": denodo, "dynatrace": dynatrace, "mft": mft, "snowflake": snowflake, "oracle": oracle}
 
 

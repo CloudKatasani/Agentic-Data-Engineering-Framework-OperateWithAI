@@ -5,6 +5,8 @@ reaches the client without that."""
 
 from __future__ import annotations
 
+from . import llm
+
 NAME = "Comms Agent"
 
 
@@ -68,8 +70,10 @@ def run(ops) -> None:
                 c["status"] = "superseded"
         ops.close_notes(inc["id"], kinds=("comms",), reason="superseded by a newer draft")
         inc["comms_outlook"] = worst
-        c = {"n": len(inc["comms"]) + 1, "stage": stage, "status": "draft", "text": _draft(ops, inc, stage), "to": _recipients(ops, inc),
-             "created": ops.now.isoformat(), "sent_by": None}
+        text = _draft(ops, inc, stage)
+        better = llm.rewrite_message(ops, inc, text)
+        c = {"n": len(inc["comms"]) + 1, "stage": stage, "status": "draft", "text": better["text"] if better else text, "to": _recipients(ops, inc),
+             "created": ops.now.isoformat(), "sent_by": None, "written_with": better["model"] if better else None}
         inc["comms"].append(c)
         ops.note(inc, NAME, f"Drafted the {stage} stakeholder message for {ops.env.holder('incident_manager')} to approve")
         ops.notify(ops.env.holder("incident_manager"), "comms", inc, f"Approve the {stage} message for {inc['id']} ({inc['priority']})",

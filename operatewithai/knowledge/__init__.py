@@ -25,6 +25,7 @@ class KB:
         self.never = acts["never"]
         self.requests = {r["id"]: r for r in _load("requests.yaml")["catalogue"]}
         self.signals = _load("signals.yaml")["tools"]
+        self.endpoints = _load("endpoints.yaml")["tools"]
 
     def known_errors(self) -> list[dict]:
         learned = self.store.all("ke") if self.store else []

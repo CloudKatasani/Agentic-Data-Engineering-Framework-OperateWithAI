@@ -10,6 +10,8 @@ from datetime import datetime
 
 from ..engine.history import occurrences
 
+from . import llm
+
 NAME = "Problem and Knowledge Agent"
 
 
@@ -58,7 +60,12 @@ def run(ops) -> None:
         inc["reviewed"] = True
         ke = ops.kb.get(inc["ke"])
         if inc["priority"] in ("P1", "P2") or inc["major"]:
-            inc["pir"] = {"text": _pir(ops, inc), "status": "draft", "approved_by": None}
+            text = _pir(ops, inc)
+            summary = llm.review_summary(ops, inc, text)
+            if summary:
+                head, rest = text.split("\n## Timeline", 1)
+                text = f"{head}\n## Summary\n{summary['text']}\n\n*Summary written with {summary['model']}; everything below is from the ticket record.*\n\n## Timeline{rest}"
+            inc["pir"] = {"text": text, "status": "draft", "approved_by": None}
             ops.note(inc, NAME, "Drafted the post-incident review for the service delivery manager")
             ops.notify(ops.env.holder("sdm"), "pir", inc, f"Review the post-incident review for {inc['id']}", inc["pir"]["text"],
                        [{"id": "approve", "label": "Approve review", "style": "primary"}], NAME, due_minutes=480, role="service delivery manager")
@@ -83,6 +90,10 @@ def run(ops) -> None:
                      "cause": f"First seen in {inc['id']}. Engineer's finding: {inc['manual_notes']}",
                      "plan": [{"kind": "manual", "fixes": True, "title": "Apply the fix recorded from the first occurrence", "guidance": inc["manual_notes"]}],
                      "permanent_fix": "", "learned_from": inc["id"]}
+            better = llm.known_error(ops, inc, ev["message"], inc["manual_notes"])
+            if better:
+                draft.update(title=better["title"], cause=f"{better['cause']} (First seen in {inc['id']}; wording drafted with {better['model']}.)")
+                draft["plan"][0]["guidance"] = better["fix"]
             ops.store.put("ke_draft", draft)
             ops.note(inc, NAME, f"This error was not in the known error database. Drafted {draft['id']} from the engineer's notes for approval")
             ops.notify(inc["resolution"]["by"], "kedb", inc, f"Add a new known error from {inc['id']}?",

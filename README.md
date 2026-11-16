@@ -141,11 +141,49 @@ client engagement:
    catalogue with them.
 4. Send notifications to the team's channel and tickets to ServiceNow (the record payload is built).
 
-Agent decisions here are rules and runbooks, which is what makes them predictable and
-auditable. A language model is optional and narrow: with `OWAI_LLM=1` and Anthropic
-credentials, the Diagnosis Agent asks it for hypotheses when no known error matches, and shows
-the answer as an unverified suggestion. It is off by default and has not been exercised against
-the live API in this repository's tests.
+## AI models
+
+Detection, correlation, priority, runbook execution and SLA projection are rules and
+runbooks, which is what makes them predictable and auditable. A language model is used only
+for six language tasks, each **off by default** and configured on the **AI models** page with
+its own provider and model:
+
+| Agent | Task |
+|---|---|
+| Triage | Suggest the owning team for an alert no known error matches |
+| Diagnosis | Hypotheses and next checks for an unknown error |
+| Comms | Write the stakeholder message in plain business language |
+| Problem and Knowledge | Executive summary of the post-incident review; known error wording from the engineer's notes |
+| Service Reporting | Summary paragraph of the shift handover |
+
+Providers: Anthropic (Claude), OpenAI, Azure OpenAI, Google Gemini, Amazon Bedrock and any
+OpenAI-compatible endpoint (Ollama, vLLM, a gateway). Model lists are suggestions; any model
+id can be typed. Keys are read from environment variables (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `GOOGLE_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`,
+`OWAI_COMPATIBLE_API_KEY`) and never stored. Model output is always a draft or a suggestion
+that the named person reviews; a model never selects or runs an action; on any failure the
+rule-based output is used. Prompts carry status, log and ticket text with emails, IP addresses
+and long numbers removed. The provider clients are covered by tests with a stand-in model
+only: none of them has been run against a live provider API from this repository.
+
+## Integration endpoints
+
+**Data needed from tools > Integration endpoints** lists, for each tool:
+
+- **Connection**: the address the collectors use and the *name* of the credential in the
+  client's vault. These are saved; the collectors that pull on a schedule and the adapters
+  that carry out actions are the per-client integration work and are not included.
+- **Inbound endpoints**: `POST /api/ingest/<feed>` accepts the tool's own format and feeds the
+  Watch Desk Agent immediately. Feeds: `oracle`, `oracle_alert`, `goldengate`, `goldengate_log`,
+  `informatica`, `db2`, `snowflake`, `dbt`, `denodo`, `powerbi`, `cognos`, `dynatrace`, `aws`,
+  `azure`, `mft`, `servicenow_change`. Each has a sample and a "Send sample" button.
+
+```bash
+curl -X POST http://127.0.0.1:8090/api/ingest/goldengate_log -H "Content-Type: text/plain" \
+  --data "2026-03-03T03:10:00.000-0500  ERROR   OGG-01224  Oracle GoldenGate Capture for Oracle, pmp_erp.prm:  TCP/IP error 111"
+```
+
+Settings are kept in `.owai/settings.json` (`OWAI_HOME` to move it); it holds no secrets.
 
 ## Security
 

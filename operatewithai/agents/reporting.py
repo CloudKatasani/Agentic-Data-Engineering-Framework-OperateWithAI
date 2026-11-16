@@ -8,6 +8,8 @@ from datetime import datetime
 
 from ..engine.history import history
 
+from . import llm
+
 NAME = "Service Reporting Agent"
 
 
@@ -56,7 +58,16 @@ def _next_step(inc: dict) -> str:
     return f"Step {step['n']} ({step['status']}): {step['title']} - with {who}"
 
 
-def handover(ops) -> str:
+def handover(ops, with_summary: bool = False) -> str:
+    text = _handover(ops)
+    summary = llm.handover_summary(ops, text) if with_summary else None
+    if summary:
+        head, rest = text.split("\n## Business services", 1)
+        text = f"{head}\n## Summary\n{summary['text']}\n\n*Summary written with {summary['model']}; everything below is from the record.*\n\n## Business services{rest}"
+    return text
+
+
+def _handover(ops) -> str:
     env, proj = ops.env, ops.projection
     incs = ops.tickets("incident")
     open_incs = [i for i in incs if i["state"] != "Resolved"]

@@ -338,3 +338,106 @@ def test_every_scenario_recovers_step_by_step(sid):
     assert all("delivered" in s["status"] for s in svc.ops.projection["services"].values())
     (issue,) = pipeline.build(svc.ops)["issues"]
     assert [s["state"] for s in issue["stages"] if s["key"] not in ("inform",)] == ["done"] * 7
+
+
+# ------------------------------------------------------------------ AI models and integration endpoints
+class FakeModel:
+    """Stands in for a provider: records prompts and answers per function."""
+    def __init__(self):
+        self.prompts = []
+
+    def complete(self, *, system, prompt, model, max_tokens):
+        from operatewithai.llm.providers import LLMResult
+        self.prompts.append((system, prompt, model))
+        if "JSON" in system and "hypotheses" in system:
+            text = 'Here you go: {"hypotheses": [{"cause": "Leaked sessions", "why": "pool is full"}], "next_checks": ["List idle sessions"]}'
+        elif "JSON" in system and "team" in system:
+            text = '{"team": "Virtualization - Denodo", "area": "connection pool", "why": "The error names the pool."}'
+        elif "JSON" in system:
+            text = '{"title": "Denodo: data source pool exhausted", "cause": "Idle sessions leaked.", "fix": "Kill idle sessions; raise maxActive."}'
+        else:
+            text = "PLAIN LANGUAGE VERSION"
+        return LLMResult(text, "fake-model-1", "fake", 100, 20)
+
+
+@pytest.fixture
+def owai_home(tmp_path, monkeypatch):
+    from operatewithai.llm import router
+    monkeypatch.setenv("OWAI_HOME", str(tmp_path))
+    for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    router.usage.clear()
+    yield tmp_path
+    router.client_override = None
+
+
+def test_models_are_off_by_default_and_configurable_per_function(owai_home, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from operatewithai.api.app import create_app
+    from operatewithai.llm import router
+    c = TestClient(create_app(night([], "00:40")))
+    m = c.get("/api/models").json()
+    assert all(not f["enabled"] for f in m["functions"])
+    assert {p["id"] for p in m["providers"]} >= {"anthropic", "openai", "azure_openai", "google_gemini", "aws_bedrock", "openai_compatible"}
+    assert c.put("/api/models/functions/comms.rewrite", json={"enabled": True, "provider": "openai", "model": "gpt-5.6-terra"}).status_code == 200
+    assert router.function_config("comms.rewrite") == {"enabled": True, "provider": "openai", "model": "gpt-5.6-terra"}
+    assert router.function_config("diagnosis.hypotheses")["enabled"] is False
+    assert c.put("/api/models/functions/comms.rewrite", json={"enabled": True, "provider": "nope", "model": "x"}).status_code == 422
+    assert router.complete("comms.rewrite", "s", "p") is None                 # no key: fails closed, rule-based output is used
+    assert router.usage["comms.rewrite"]["failed"] == 1
+    assert c.post("/api/models/providers/anthropic/test", json={"model": "claude-haiku-5-5"}).json()["ok"] is False
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    assert next(p for p in c.get("/api/models").json()["providers"] if p["id"] == "openai")["ready"] is True
+
+
+def test_model_output_is_a_draft_and_people_still_decide(owai_home):
+    from operatewithai.llm import router
+    router.client_override = fake = FakeModel()
+    svc = run_with_people(["S08"])
+    (inc,) = incidents(svc)
+    assert inc["route_hint"]["team"] == "Virtualization - Denodo" and inc["tower"] == "virt"
+    assert inc["diagnosis"]["status"] == "unknown" and inc["diagnosis"]["suggestion"]["hypotheses"][0]["cause"] == "Leaked sessions"
+    assert inc["comms"][0]["written_with"] == "fake-model-1" and inc["comms"][0]["sent_by"] == "Incident Manager"
+    assert "## Summary" in inc["pir"]["text"] and inc["pir"]["approved_by"] == "Service Delivery Manager"
+    learned = [k for k in svc.ops.kb.known_errors() if k.get("learned_from")]
+    assert learned[0]["title"] == "Denodo: data source pool exhausted" and learned[0]["approved_by"] == "Denodo Engineer"
+    assert all("untrusted" in s for s, _, _ in fake.prompts)
+    assert any("Used a language model" in a["action"] for a in svc.store.audit_log(limit=2000))
+
+
+def test_prompts_are_redacted():
+    from operatewithai.llm.router import redact
+    assert redact("user jane.doe@client.com from 10.20.30.40 card 4111111111111111") == "user [email] from [ip] card [number]"
+
+
+def test_integration_endpoints_accept_each_tools_format(owai_home):
+    from fastapi.testclient import TestClient
+
+    from operatewithai.api.app import create_app
+    svc = night([], "01:00")
+    c = TestClient(create_app(svc))
+    tools = c.get("/api/integrations").json()["tools"]
+    assert {t["id"] for t in tools} >= {"oracle", "goldengate", "informatica", "db2", "snowflake", "dbt", "denodo", "powerbi", "cognos", "dynatrace", "aws", "azure", "mft", "servicenow"}
+    for t in tools:
+        for e in t["inbound"]:
+            if e["format"] == "text":
+                r = c.post(f"/api/ingest/{e['id']}", content=e["sample"], headers={"content-type": "text/plain"})
+            else:
+                r = c.post(f"/api/ingest/{e['id']}", json=e["sample"])
+            assert r.status_code == 200 and r.json()["accepted"], (e["id"], r.text)
+    kes = {i["ke"] for i in incidents(svc)}
+    assert {"KE0102", "KE0104", "KE0105", "KE0107", "KE0108"} <= kes          # reference known errors recognised from pushed data
+    assert any(ch["id"] == "CHG0032011" for ch in svc.env.data["changes"])
+    assert c.post("/api/ingest/dynatrace", json={"wrong": "shape"}).status_code == 403
+    assert c.post("/api/ingest/unknown_tool", json={}).status_code == 404
+    assert c.put("/api/integrations/snowflake", json={"endpoint": "https://xy.snowflakecomputing.com", "credential": "SNOWFLAKE_OPS_KEYPAIR", "enabled": True}).status_code == 200
+    snow = next(t for t in c.get("/api/integrations").json()["tools"] if t["id"] == "snowflake")
+    assert snow["connect"]["enabled"] and snow["inbound"][0]["received"]["count"] == 1
+
+
+def test_alert_inside_a_pushed_change_window_is_suppressed():
+    svc = night([], "01:00")
+    svc.ingest("servicenow_change", {"number": "CHG1", "cmdb_ci": "COGNOS_PRD", "short_description": "Fix pack", "start_date": "2026-03-03 00:00", "end_date": "2026-03-03 08:00"})
+    svc.ingest("cognos", {"COGIPF_REPORTNAME": "Claims Aging", "COGIPF_STATUS": "Failure", "COGIPF_ERRORDETAILS": "DPR-ERR-2109 The dispatcher cannot service the request"})
+    assert incidents(svc) == [] and svc.store.all("event")[-1]["status"] == "suppressed"

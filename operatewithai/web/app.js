@@ -33,6 +33,14 @@ async function api(method, path, body, as) {
   }
   return r.json();
 }
+async function raw(path, text, type) {
+  const headers = { "Content-Type": type };
+  const token = store.get("owai_token", "");
+  if (token) headers.Authorization = "Bearer " + token;
+  const r = await fetch("/api" + path, { method: "POST", headers, body: text });
+  if (!r.ok) { let msg = r.statusText; try { msg = (await r.json()).detail || msg; } catch { /* not json */ } throw new Error(msg); }
+  return r.json();
+}
 function toast(msg, kind = "") {
   const t = document.createElement("div");
   t.className = "t " + kind;
@@ -246,6 +254,7 @@ routes.ticket = async (id) => {
     <div class="chain">${c.nodes.map((n, i) => `${i ? '<span class="arrow">›</span>' : ""}<div class="cn ${n.root ? "root" : n.affected ? "hit" : "ok"}"><div class="k">${esc(n.kind)}${n.root ? " · cause here" : ""}</div>${esc(n.name)}<div class="st ${slug(n.state)}">${esc(n.state)}${n.eta && !["succeeded"].includes(n.state) ? " · est. " + hm(n.eta) : ""}</div></div>`).join("")}</div>`).join("");
   const diag = d ? `<div class="card"><h3 style="margin-top:0">Diagnosis ${badge(d.status, { confirmed: "b-ok", likely: "b-warn", unknown: "b-bad", unconfirmed: "b-bad", recognised: "b-info" }[d.status])} ${t.ke ? `<a href="#/knowledge">${esc(t.ke)}</a>` : ""}</h3>
       <p>${esc(d.cause)}</p>${table(["Check (read-only)", "What it showed", ""], d.evidence.map((e) => `<tr><td>${esc(e.check)}<div class="muted small mono">${esc(e.probe)}</div></td><td>${esc(e.result)}</td><td>${e.confirms === true ? badge("confirms", "b-ok") : e.confirms === false ? badge("does not confirm", "b-bad") : badge("fact")}</td></tr>`))}
+      ${t.route_hint ? `<div class="notice warn" style="margin-top:10px"><b>Routing suggestion (unverified, ${esc(t.route_hint.model)}):</b> ${esc(t.route_hint.team)}${t.route_hint.area ? " · " + esc(t.route_hint.area) : ""}. ${esc(t.route_hint.why)}</div>` : ""}
       ${d.suggestion ? `<div class="notice warn" style="margin-top:10px"><b>Language-model suggestion (unverified, ${esc(d.suggestion.model)})</b><ul>${d.suggestion.hypotheses.map((h) => `<li>${esc(h.cause)}: ${esc(h.why)}</li>`).join("")}</ul>Checks to try: ${esc(d.suggestion.next_checks.join("; "))}</div>` : ""}</div>` : "";
   const steps = plan ? `<div class="card"><h3 style="margin-top:0">Fix plan ${badge(plan.status, { done: "b-ok", accepted: "b-info", manual: "b-violet", blocked: "b-bad", proposed: "b-warn" }[plan.status])}
       <span class="muted small">${plan.source === "engineer" ? "worked by the engineer" : "from runbook " + esc(plan.source)}${plan.accepted_by ? " · accepted by " + esc(plan.accepted_by) : " · nothing runs until the engineer accepts"}</span></h3>
@@ -254,7 +263,7 @@ routes.ticket = async (id) => {
           ${s.approver ? ` · approval: <b>${esc(s.approver)}</b> (${esc(s.approver_role.replace(/_/g, " "))})${s.approved_by ? " ✓ " + hm(s.approved_at) : ""}` : s.kind === "action" ? " · standard runbook step" : ""}
           ${s.how ? `<span class="muted"> · ${esc(s.how)}</span>` : ""}</div>${s.result ? `<div class="res">${esc(s.result)}</div>` : ""}${s.guidance && s.status !== "done" ? `<div class="res">${esc(s.guidance)}</div>` : ""}</div>
         <div>${badge(s.status, STEP_CLS[s.status])}</div></li>`).join("")}</ul></div>` : "";
-  const comms = (t.comms || []).length ? `<div class="card"><h3 style="margin-top:0">Stakeholder messages</h3>${t.comms.map((c) => `<details><summary>${esc(c.stage)} ${badge(c.status, { sent: "b-ok", draft: "b-warn" }[c.status])} <span class="muted small">to ${esc(c.to.join(", "))}${c.sent_by ? " · approved by " + esc(c.sent_by) + " " + hm(c.sent_at) : ""}</span></summary><pre class="pre">${esc(c.text)}</pre></details>`).join("")}</div>` : "";
+  const comms = (t.comms || []).length ? `<div class="card"><h3 style="margin-top:0">Stakeholder messages</h3>${t.comms.map((c) => `<details><summary>${esc(c.stage)} ${badge(c.status, { sent: "b-ok", draft: "b-warn" }[c.status])} <span class="muted small">to ${esc(c.to.join(", "))}${c.sent_by ? " · approved by " + esc(c.sent_by) + " " + hm(c.sent_at) : ""}${c.written_with ? " · wording by " + esc(c.written_with) : ""}</span></summary><pre class="pre">${esc(c.text)}</pre></details>`).join("")}</div>` : "";
   const req = t.type === "request" ? `<div class="card"><div class="kv" style="grid-template-columns:150px 1fr"><div class="k">Requested by</div><div>${esc(t.requester)}</div><div class="k">Stage</div><div>${badge(t.stage)}</div>
       ${Object.entries(t.fields).map(([k, v]) => `<div class="k">${esc(k)}</div><div>${esc(META.nodes[v] || v)}</div>`).join("")}
       <div class="k">Approvals</div><div>${t.approvals.map((a) => `${esc(a.person)} (${esc(a.role.replace(/_/g, " "))}) ${badge(a.status, { approved: "b-ok", declined: "b-bad", pending: "b-warn" }[a.status])}`).join("<br>") || "None needed (standard request)"}</div></div></div>` : "";
@@ -321,6 +330,7 @@ routes.requests = async () => {
 routes.data = async () => {
   const tab = store.get("owai_dtab", "tools");
   const d = await api("GET", "/signals");
+  const I = tab === "endpoints" ? await api("GET", "/integrations") : null;
   const TYPE = { Log: "b-info", Telemetry: "b-ok", Audit: "b-violet", Metadata: "" };
   const feeds = d.tools.flatMap((t) => t.feeds.map((f) => ({ ...f, tool: t.tool })));
   const count = (ty) => feeds.filter((f) => f.type === ty).length;
@@ -330,6 +340,14 @@ routes.data = async () => {
       ${table(["Feed", "Type", "What it tells the agents", "Used by", "What that makes possible"], t.feeds.map((f) => `<tr><td><b>${esc(f.name)}</b></td><td>${badge(f.type, TYPE[f.type])}</td><td>${esc(f.gives)}</td><td class="small">${f.agents.map((a) => esc(a)).join("<br>")}</td><td>${esc(f.enables)}</td></tr>`))}</div>`).join(""),
     agents: () => d.agents.map((name) => { const mine = feeds.filter((f) => f.agents.includes(name.replace(/ Agent$/, ""))); return mine.length ? `<div class="card"><h3 style="margin-top:0">${esc(name)} <span class="muted small">${mine.length} feeds from ${new Set(mine.map((f) => f.tool)).size} tools</span></h3>
       ${table(["Tool", "Feed", "Type", "What the agent does with it"], mine.map((f) => `<tr><td><b>${esc(f.tool)}</b></td><td>${esc(f.name)}</td><td>${badge(f.type, TYPE[f.type])}</td><td>${esc(f.enables)}</td></tr>`))}</div>` : ""; }).join(""),
+    endpoints: () => `<p class="muted">Two directions per tool. <b>Connection</b>: where the collectors reach the tool; only the address and the <i>name</i> of the credential are stored, the secret stays in the client's vault. <b>Inbound</b>: where the tool or its log shipper posts data in its own format${I.token_required ? "; send the API token as a bearer token" : ""}. "Send sample" posts the example into tonight's run so you can watch the agents pick it up.</p>
+      ${I.tools.map((t) => `<div class="card"><div class="spread"><h3 style="margin:0">${esc(t.tool)}</h3>${t.connect.enabled ? badge("connection saved", "b-ok") : badge("not connected")}</div>
+        <div class="field-row" style="align-items:end;margin:8px 0 12px"><div style="flex:3"><label>${esc(t.connect.what)}</label><input data-ep="${t.id}" value="${esc(t.connect.endpoint)}" placeholder="${esc(t.connect.example)}"></div>
+          <div style="flex:2"><label>Credential name in the vault</label><input data-cred="${t.id}" value="${esc(t.connect.credential_ref)}"></div>
+          <div><button class="btn" data-savei="${t.id}">Save</button></div></div>
+        ${table(["Inbound endpoint", "Feed", "Format", "Received", ""], t.inbound.map((e) => `<tr><td class="mono small">POST ${esc(e.url)}</td><td>${esc(e.feed)}</td><td>${badge(e.format)}</td>
+          <td class="small">${e.received ? `${e.received.count} call(s), ${e.received.alerts} alert(s)` : "nothing yet"}</td>
+          <td style="white-space:nowrap"><button class="btn small" data-sample="${e.id}">Show sample</button> <button class="btn small primary" data-send="${e.id}">Send sample</button></td></tr>`))}</div>`).join("")}`,
     tonight: () => `<div class="card"><div class="funnel"><span><b>${d.watch.raw || 0}</b> tool reports read</span>→<span><b>${d.watch.alerts || 0}</b> alerting</span>→<span><b>${d.watch.events || 0}</b> after merging repeats</span>→<span><b>${new Set(d.events.map((e) => e.incident).filter(Boolean)).size}</b> incidents</span></div></div>
       ${table(["First seen", "Tool", "Alert", "Codes", "Seen", "What the agents did with it", "State"], d.events.map((e) => `<tr><td class="mono">${hm(e.first_seen)}</td><td>${esc(e.source)}</td><td>${esc(e.message)}</td><td class="mono small">${esc(e.codes.join(" "))}</td><td>×${e.count}</td>
       <td class="small">${esc(e.handling)} ${e.incident ? `<a href="#/ticket/${esc(e.incident)}">${esc(e.incident)}</a>` : ""}</td><td>${badge(e.status, e.status === "cleared" ? "b-ok" : e.status === "suppressed" ? "b-violet" : e.severity === "warning" ? "b-warn" : "b-bad")}</td></tr>`), "No alerts yet tonight.")}`,
@@ -337,8 +355,22 @@ routes.data = async () => {
   main().innerHTML = `<h1>Data needed from tools</h1><div class="sub">The logs, telemetry, audit data and metadata each tool must provide for the agents to work. All of it is read-only status and metadata: no business data rows leave the client's systems.</div>
     <div class="grid g4"><div class="card kpi"><div class="v">${d.tools.length}</div><div class="l">Tools connected</div></div><div class="card kpi"><div class="v">${count("Log")}</div><div class="l">Log feeds</div></div>
       <div class="card kpi"><div class="v">${count("Telemetry")}</div><div class="l">Telemetry feeds</div></div><div class="card kpi"><div class="v">${count("Audit") + count("Metadata")}</div><div class="l">Audit and metadata feeds</div></div></div>
-    <div class="tabs" style="margin-top:16px">${[["tools", "By tool"], ["agents", "By agent"], ["tonight", "Read tonight"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
+    <div class="tabs" style="margin-top:16px">${[["tools", "By tool"], ["agents", "By agent"], ["endpoints", "Integration endpoints"], ["tonight", "Read tonight"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
   $$("[data-tab]").forEach((el) => { el.onclick = () => { store.set("owai_dtab", el.dataset.tab); render(); }; });
+  if (!I) return;
+  const find = (id) => I.tools.flatMap((t) => t.inbound).find((e) => e.id === id);
+  const sampleText = (e) => (e.format === "text" ? e.sample : JSON.stringify(e.sample, null, 2));
+  $$("[data-savei]").forEach((b) => { b.onclick = async () => { const id = b.dataset.savei, endpoint = $(`[data-ep="${id}"]`).value;
+    await guard(() => api("PUT", "/integrations/" + id, { endpoint, credential: $(`[data-cred="${id}"]`).value, enabled: !!endpoint.trim() }), "Saved"); render(true); }; });
+  $$("[data-sample]").forEach((b) => { b.onclick = () => { const e = find(b.dataset.sample);
+    modal(`<h2>${esc(e.feed)}</h2><p class="muted small">POST ${esc(e.url)} · Content-Type: ${e.format === "text" ? "text/plain" : "application/json"}</p><pre class="code">${esc(sampleText(e))}</pre>
+      <p class="muted small">curl -X POST ${esc(e.url)} -H "Content-Type: ${e.format === "text" ? "text/plain" : "application/json"}" --data-binary @payload</p><button class="btn" onclick="closeModal()">Close</button>`); }; });
+  $$("[data-send]").forEach((b) => { b.onclick = async () => { const e = find(b.dataset.send);
+    const r = await guard(() => raw("/ingest/" + e.id, sampleText(e), e.format === "text" ? "text/plain" : "application/json"));
+    const a = r.new_alerts[0];
+    modal(`<h2>Received by the Watch Desk Agent</h2>${r.new_alerts.length ? r.new_alerts.map((x) => `<p><b>${esc(x.message)}</b><br><span class="muted small">Codes: ${esc(x.codes.join(" ") || "none")}</span><br>${esc(x.handling)} ${x.incident ? `<a href="#/ticket/${esc(x.incident)}" onclick="closeModal()">${esc(x.incident)}</a>` : ""}</p>`).join("") : "<p>Accepted. Nothing new to alert on (already known, healthy, or added to the change calendar).</p>"}
+      <div class="row"><a class="btn primary" href="#/run" onclick="closeModal()">See it in the live run</a><button class="btn ghost" onclick="closeModal()">Close</button></div>`);
+    render(true); }; });
 };
 
 // ------------------------------------------------------------------ knowledge
@@ -369,7 +401,7 @@ routes.reports = async () => {
   const body = {
     health: () => `<div class="grid g3"><div class="card kpi"><div class="v">${dot("green")}${r.summary.green}</div><div class="l">Healthy</div></div><div class="card kpi"><div class="v">${dot("amber")}${r.summary.amber}</div><div class="l">Watch</div></div><div class="card kpi"><div class="v">${dot("red")}${r.summary.red}</div><div class="l">In incident</div></div></div>
       ${table(["", "System", "Tower", "Where", "Finding"], r.systems.map((s) => `<tr><td>${dot(s.status)}</td><td><b>${esc(s.name)}</b><div class="muted small mono">${esc(s.ci)}</div></td><td>${esc(s.tower)}</td><td>${esc(s.cloud)}</td><td>${esc(s.detail)}</td></tr>`))}`,
-    handover: () => `<div class="card">${md(r.markdown)}</div>`,
+    handover: () => `${r.summary_available ? `<p><button class="btn" id="hoSum">Add a summary written by the configured model</button></p>` : ""}<div class="card" id="hoBody">${md(r.markdown)}</div>`,
     review: () => `<p class="muted">${esc(r.period)}. History is sample data for the demo client; tonight's numbers come from the tickets.</p>
       <div class="grid g4"><div class="card kpi"><div class="v">${r.overall.count}</div><div class="l">Incidents</div></div><div class="card kpi"><div class="v">${pct(r.overall.respond_pct)}</div><div class="l">Response SLA met</div></div>
         <div class="card kpi"><div class="v">${pct(r.overall.resolve_pct)}</div><div class="l">Resolution SLA met</div></div><div class="card kpi"><div class="v">${r.overall.mttr} min</div><div class="l">Mean time to resolve</div></div></div>
@@ -385,6 +417,7 @@ routes.reports = async () => {
   main().innerHTML = `<h1>Reports</h1><div class="sub">Written by the Service Reporting Agent from tickets, the audit log and the batch projection</div>
     <div class="tabs">${[["health", "Morning health check"], ["handover", "Shift handover"], ["review", "Service review"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
   $$("[data-tab]").forEach((el) => { el.onclick = () => { store.set("owai_rtab", el.dataset.tab); render(); }; });
+  if ($("#hoSum")) $("#hoSum").onclick = async () => { $("#hoSum").disabled = true; const x = await guard(() => api("GET", "/reports/handover?summary=true")); $("#hoBody").innerHTML = md(x.markdown); };
 };
 
 // ------------------------------------------------------------------ team
@@ -405,6 +438,48 @@ routes.team = async () => {
       ${a.asks.length ? `<div class="lbl">Brings in</div><ul>${a.asks.map(([w, y]) => `<li><b>${esc(w)}</b> ${esc(y)}</li>`).join("")}</ul>` : ""}</div>`; }).join("")}</div>
     <h2>The people and what they decide</h2>
     ${table(["Seat", "Covers", "Decides", "Waiting on them now"], t.people.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.covers || p.group)}</td><td>${esc(p.decides)}</td><td>${p.open ? badge(p.open, "b-warn") : ""}</td></tr>`))}`;
+};
+
+// ------------------------------------------------------------------ AI models
+routes.models = async () => {
+  const m = await api("GET", "/models");
+  const prov = (id) => m.providers.find((p) => p.id === id);
+  const modelOptions = (pid, current) => { const list = prov(pid).models; return list.map((x) => `<option value="${esc(x.id)}" ${x.id === current ? "selected" : ""}>${esc(x.label)}</option>`).join("") + (list.some((x) => x.id === current) ? "" : `<option value="${esc(current)}" selected>${esc(current)} (custom)</option>`) + '<option value="__custom">Other model id…</option>'; };
+  const agents = [...new Set(m.functions.map((f) => f.agent))];
+  main().innerHTML = `<h1>AI models</h1><div class="sub">Choose the provider and model for each language task an agent can hand to a model. Everything else the agents do is rules and runbooks, so it is predictable and auditable.</div>
+    <div class="notice" style="margin-bottom:14px">Every task is <b>off by default</b>. A model's output is always a draft or a suggestion that the named person reviews; a model never selects or runs an action. Prompts carry status, log and ticket text only, with emails, IP addresses and long numbers removed.</div>
+    <h2 style="margin-top:0">Providers</h2>
+    <div class="grid g3">${m.providers.map((p) => `<div class="card"><div class="spread"><h3 style="margin:0">${esc(p.label)}</h3>${p.ready ? badge("ready", "b-ok") : badge(p.key_present || p.key_optional ? "needs base URL" : "no key", "b-warn")}</div>
+      <div class="small muted" style="margin:6px 0">Key from environment variable <code>${esc(p.key_env)}</code>: ${p.key_present ? "set" : p.key_optional ? "optional, not set" : "not set"}</div>
+      ${p.needs_base_url ? `<label>Base URL</label><div class="row"><input data-base="${p.id}" value="${esc(p.base_url)}" placeholder="${esc(p.default_base_url)}"><button class="btn small" data-saveb="${p.id}">Save</button></div>` : ""}
+      <div class="row" style="margin-top:8px"><button class="btn small" data-test="${p.id}" ${p.ready ? "" : "disabled"}>Test connection</button><button class="btn small ghost" data-disc="${p.id}" ${p.ready ? "" : "disabled"}>Discover models</button></div></div>`).join("")}</div>
+    <p class="muted small">API keys are never entered or stored here. Set the environment variable from your vault or secret manager and restart. "Test connection" makes one very small real call.</p>
+    <h2>Model per agent task</h2>
+    ${agents.map((a) => `<div class="card"><h3 style="margin-top:0">${esc(a)}</h3>${m.functions.filter((f) => f.agent === a).map((f) => `<div class="fn" data-fn="${f.id}" style="padding:10px 0;border-top:1px dashed var(--border)">
+        <div class="spread"><div><b>${esc(f.title)}</b><div class="small">${esc(f.does)}</div><div class="small muted">Safeguard: ${esc(f.guard)}</div></div>
+          <label class="chk" style="white-space:nowrap"><input type="checkbox" data-k="enabled" ${f.enabled ? "checked" : ""}> Use a model</label></div>
+        <div class="field-row" style="align-items:end;margin-top:8px"><div style="flex:2"><label>Provider</label><select data-k="provider">${m.providers.map((p) => `<option value="${p.id}" ${p.id === f.provider ? "selected" : ""}>${esc(p.label)}${p.ready ? "" : " (not ready)"}</option>`).join("")}</select></div>
+          <div style="flex:2"><label>Model</label><select data-k="model">${modelOptions(f.provider, f.model)}</select></div>
+          <div><button class="btn primary" data-savef="${f.id}">Save</button></div></div>
+        ${f.usage ? `<div class="small muted" style="margin-top:6px">This session: ${f.usage.calls} call(s), ${f.usage.input_tokens} tokens in, ${f.usage.output_tokens} out${f.usage.last_model ? ", last served by " + esc(f.usage.last_model) : ""}${f.usage.failed ? ` · ${f.usage.failed} failed${f.usage.last_error ? ": " + esc(f.usage.last_error) : ""} (rule-based output used)` : ""}</div>` : ""}</div>`).join("")}</div>`).join("")}
+    <h2>Agents that never use a model</h2>
+    ${table(["Agent", "Why"], m.rules_only.map((r) => `<tr><td><b>${esc(r.agent)}</b></td><td>${esc(r.why)}</td></tr>`))}`;
+  $$(".fn").forEach((row) => {
+    const sel = (k) => $(`[data-k="${k}"]`, row);
+    sel("provider").onchange = () => { sel("model").innerHTML = modelOptions(sel("provider").value, prov(sel("provider").value).models[0].id); };
+    sel("model").onchange = () => { if (sel("model").value !== "__custom") return; const v = (prompt("Model id (or deployment name) exactly as the provider expects it:") || "").trim();
+      sel("model").innerHTML = modelOptions(sel("provider").value, v || prov(sel("provider").value).models[0].id); };
+    $("[data-savef]", row).onclick = async () => {
+      await guard(() => api("PUT", "/models/functions/" + row.dataset.fn, { enabled: sel("enabled").checked, provider: sel("provider").value, model: sel("model").value }), "Saved");
+      if (sel("enabled").checked && !prov(sel("provider").value).ready) toast("Saved, but this provider is not ready yet: the agent keeps its rule-based output until the key is set.", "err");
+    };
+  });
+  $$("[data-saveb]").forEach((b) => { b.onclick = async () => { await guard(() => api("PUT", "/models/providers/" + b.dataset.saveb, { base_url: $(`[data-base="${b.dataset.saveb}"]`).value }), "Saved"); render(true); }; });
+  $$("[data-test]").forEach((b) => { b.onclick = async () => { const p = prov(b.dataset.test); b.disabled = true;
+    const r = await guard(() => api("POST", `/models/providers/${p.id}/test`, { model: p.models[0].id })); b.disabled = false;
+    toast(r.ok ? `${p.label}: connected, served by ${r.model}` : `${p.label}: ${r.error}`, r.ok ? "ok" : "err"); }; });
+  $$("[data-disc]").forEach((b) => { b.onclick = async () => { const p = prov(b.dataset.disc); const r = await guard(() => api("GET", `/models/providers/${p.id}/discover`));
+    modal(`<h2>${esc(p.label)}: models this key can use</h2>${r.ok ? (r.models.length ? `<pre class="code">${esc(r.models.join("\n"))}</pre>` : "<p>The provider has no model listing; type the deployment or model id as a custom model.</p>") : `<div class="notice bad">${esc(r.error)}</div>`}<p></p><button class="btn" onclick="closeModal()">Close</button>`); }; });
 };
 
 // ------------------------------------------------------------------ audit

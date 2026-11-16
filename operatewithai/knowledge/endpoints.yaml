@@ -1,0 +1,102 @@
+# Integration endpoints, per tool.
+#   connect: how OperateWithAI reaches the tool to collect (pull) and to act. The address and
+#            the NAME of the credential are stored; the secret itself stays in the client's vault.
+#   inbound: where the tool, its log shipper or a scheduler posts data. POST /api/ingest/<id>
+#            accepts the tool's own format; the sample is what "Send sample" posts.
+tools:
+  - id: oracle
+    tool: Oracle Database
+    connect: {what: "JDBC URL of the monitoring account", example: "jdbc:oracle:thin:@//ora-erp-01:1521/ERPPRD", credential: "ORACLE_MONITOR_PASSWORD"}
+    inbound:
+      - {id: oracle, feed: "DBA_USERS account status (poll result)", format: json,
+         sample: {dba_users: [{USERNAME: SVC_REPORTING, ACCOUNT_STATUS: OPEN, EXPIRES_IN_DAYS: 6, PROFILE: DEFAULT}]}}
+      - {id: oracle_alert, feed: "Alert log lines (from the log shipper)", format: text,
+         sample: "2026-03-03T02:14:07.123456+00:00 ORA-01653: unable to extend table ERP.GL_JE_LINES by 8192 in tablespace ERP_DATA"}
+  - id: goldengate
+    tool: Oracle GoldenGate
+    connect: {what: "Admin Service URL (Microservices) or GGSCI host", example: "https://ogg-hub-01:9011", credential: "OGG_MONITOR_PASSWORD"}
+    inbound:
+      - {id: goldengate_log, feed: "ggserr.log lines", format: text,
+         sample: "2026-03-03T03:10:00.000-0500  ERROR   OGG-01224  Oracle GoldenGate Capture for Oracle, pmp_erp.prm:  TCP/IP error 111 (Connection refused); retries exceeded."}
+      - {id: goldengate, feed: "INFO ALL output", format: text,
+         sample: "Program     Status      Group       Lag at Chkpt  Time Since Chkpt\nMANAGER     RUNNING\nEXTRACT     RUNNING     EXT_ERP     00:00:04      00:00:06\nEXTRACT     STOPPED     PMP_ERP     00:00:00      00:21:10\nREPLICAT    RUNNING     REP_SNF     00:00:04      00:00:06"}
+  - id: informatica
+    tool: Informatica PowerCenter
+    connect: {what: "Repository database or Domain URL", example: "infa-prd-01:6005 / domain DOM_PRD", credential: "INFA_REPO_READER_PASSWORD"}
+    inbound:
+      - {id: informatica, feed: "Workflow run row (REP_WFLOW_RUN)", format: json,
+         sample: {SUBJECT_AREA: INS_DW, WORKFLOW_NAME: wf_CLAIMS_FILE_LOAD, RUN_STATUS_CODE: 3, RUN_STATUS: Failed, START_TIME: "03/03/2026 01:45:00",
+                  RUN_ERR_MSG: "Session task instance [s_m_CLAIMS_STG] : [FR_3000] Error opening file [/landing/claims/claims_20260303.csv]. Operating system error message [No such file or directory]."}}
+  - id: db2
+    tool: IBM Db2
+    connect: {what: "JDBC URL of the monitoring account", example: "jdbc:db2://db2-pol-01:50000/POLPRD", credential: "DB2_MONITOR_PASSWORD"}
+    inbound:
+      - {id: db2, feed: "db2diag.log record", format: json,
+         sample: {timestamp: "2026-03-03-02.20.11", level: Error, database: POLPRD, message: "SQL0289N  Unable to allocate new pages in table space \"TS_POLICY_DATA\".  SQLSTATE=57011"}}
+  - id: snowflake
+    tool: Snowflake
+    connect: {what: "Account URL and monitoring role", example: "https://xy12345.eu-west-1.snowflakecomputing.com (role OPS_MONITOR)", credential: "SNOWFLAKE_OPS_KEYPAIR"}
+    inbound:
+      - {id: snowflake, feed: "Resource monitors and warehouse state (poll result)", format: json,
+         sample: {resource_monitors: [{name: RM_BI, credit_quota: 600, used_credits: 601.2, warehouse: WH_BI, warehouse_state: SUSPENDED}]}}
+  - id: dbt
+    tool: dbt
+    connect: {what: "dbt Cloud API URL and job id", example: "https://cloud.getdbt.com/api/v2/accounts/1234 (job 5678)", credential: "DBT_CLOUD_SERVICE_TOKEN"}
+    inbound:
+      - {id: dbt, feed: "Job run webhook with run_results.json and sources.json", format: json,
+         sample: {job: nightly_build, run_id: 70403999, status: error,
+                  results: [{unique_id: "model.analytics.fct_policy_premium", status: error, message: "Database Error in model fct_policy_premium: 000630 (57014): Statement reached its statement or warehouse timeout of 3600 second(s) and was canceled."}], freshness: []}}
+  - id: denodo
+    tool: Denodo
+    connect: {what: "Scheduler and VDP monitoring URL", example: "https://denodo-prd:8443/webadmin/denodo-scheduler-admin", credential: "DENODO_MONITOR_PASSWORD"}
+    inbound:
+      - {id: denodo, feed: "Scheduler job result", format: json,
+         sample: {jobName: cache_fin_views, type: VDPCache, result: ERROR, lastExecution: "2026-03-03T04:05:00", message: "Error loading cache of view bv_fin_close: connection to data source ds_snowflake_fin timed out"}}
+  - id: powerbi
+    tool: Power BI
+    connect: {what: "Tenant and workspace (service principal)", example: "tenant contoso.onmicrosoft.com, workspace Finance-PROD", credential: "PBI_SP_CLIENT_SECRET"}
+    inbound:
+      - {id: powerbi, feed: "Dataset refresh history row", format: json,
+         sample: {datasetName: "Policy and Premium Ops", requestId: rq-9912, refreshType: Scheduled, startTime: "2026-03-03T05:00:00Z", endTime: "2026-03-03T05:02:00Z", status: Failed,
+                  serviceExceptionJson: "{\"errorCode\":\"DM_GWPipeline_Gateway_DataSourceAccessError\",\"errorDescription\":\"The credentials provided for the data source are invalid.\"}"}}
+  - id: cognos
+    tool: IBM Cognos Analytics
+    connect: {what: "Audit database and dispatcher URL", example: "https://cognos-prd:9300/bi (audit DB COGAUDIT)", credential: "COGNOS_AUDIT_READER_PASSWORD"}
+    inbound:
+      - {id: cognos, feed: "Audit row (COGIPF_RUNREPORT)", format: json,
+         sample: {COGIPF_REPORTNAME: "Claims Aging", COGIPF_STATUS: Failure, COGIPF_LOCALTIMESTAMP: "2026-03-03T06:04:00", COGIPF_RUNTIME: 4100, COGIPF_TARGET_TYPE: ReportService,
+                  COGIPF_ERRORDETAILS: "QE-DEF-0285 The logon failed. QE-DEF-0325 The logon failed for the following reason: RQP-DEF-0068 Unable to connect to at least one database during a multi-database attach."}}
+  - id: dynatrace
+    tool: Dynatrace
+    connect: {what: "Environment URL (Problems API v2)", example: "https://abc12345.live.dynatrace.com", credential: "DYNATRACE_API_TOKEN"}
+    inbound:
+      - {id: dynatrace, feed: "Problem notification webhook", format: json,
+         sample: {ProblemID: P-2603031, State: OPEN, ProblemTitle: "CPU saturation", ProblemSeverity: RESOURCE_CONTENTION, ProblemImpact: INFRASTRUCTURE,
+                  ImpactedEntities: [{type: HOST, name: cognos-prd}], ProblemURL: "https://abc12345.live.dynatrace.com/#problems/problemdetails;pid=P-2603031"}}
+  - id: aws
+    tool: AWS
+    connect: {what: "Account and region (read-only role)", example: "arn:aws:iam::123456789012:role/OpsMonitorReadOnly (eu-west-1)", credential: "AWS role assumed by the collector"}
+    inbound:
+      - {id: aws, feed: "CloudWatch alarm (SNS or EventBridge)", format: json,
+         sample: {AlarmName: "ora-erp-01 StatusCheckFailed", NewStateValue: ALARM, NewStateReason: "Threshold Crossed: 2 datapoints were greater than or equal to the threshold (1.0).",
+                  Trigger: {MetricName: StatusCheckFailed, Namespace: AWS/EC2, Dimensions: [{name: InstanceName, value: ora-erp-01}]}}}
+  - id: azure
+    tool: Microsoft Azure
+    connect: {what: "Subscription and resource group", example: "subscription 0000-1111, resource group rg-bi-prod", credential: "AZURE_MONITOR_SP_SECRET"}
+    inbound:
+      - {id: azure, feed: "Azure Monitor alert (common alert schema)", format: json,
+         sample: {schemaId: azureMonitorCommonAlertSchema, data: {essentials: {alertRule: "VM availability", severity: Sev1, monitorCondition: Fired, signalType: Metric,
+                  configurationItems: [denodo-prd], description: "VM denodo-prd is unavailable"}}}}
+  - id: mft
+    tool: Managed file transfer and integrations
+    connect: {what: "Gateway audit API", example: "https://mft-01/api/v1/transfers", credential: "MFT_AUDIT_API_KEY"}
+    inbound:
+      - {id: mft, feed: "Feed status (expected against received)", format: json,
+         sample: {feed: claims_vendor, expected_file: claims_20260303.csv, expected_by: "01:30", status: RECEIVED, received_at: "2026-03-03T01:05:00",
+                  size_bytes: 1900000, avg_size_bytes_7d: 7310000, partner: "Claims administration vendor"}}
+  - id: servicenow
+    tool: ServiceNow
+    connect: {what: "Instance URL (Table API)", example: "https://client.service-now.com", credential: "SERVICENOW_INTEGRATION_PASSWORD"}
+    inbound:
+      - {id: servicenow_change, feed: "Approved change (change_request)", format: json,
+         sample: {number: CHG0032011, cmdb_ci: COGNOS_PRD, short_description: "Cognos fix pack 11.2.4 FP3", start_date: "2026-03-03 00:00", end_date: "2026-03-03 08:00", requested_by: "BI tower"}}

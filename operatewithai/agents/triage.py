@@ -4,6 +4,8 @@ matrix and routes the ticket to the on-call engineer of the right tower."""
 
 from __future__ import annotations
 
+from . import llm
+
 NAME = "Triage Agent"
 
 
@@ -119,6 +121,8 @@ def run(ops, new_events: list[dict]) -> None:
                               ke=ke["id"] if ke else None, events=[ev["id"]], fingerprints=[ev["fingerprint"]], cis=[ev["ci"]],
                               root_nodes=roots, impact_nodes=_impact_nodes(env, roots), services=services, root_event=ev["id"],
                               diagnosis=None, plan=None, comms=[], major=False)
+        if not ke:
+            inc["route_hint"] = llm.route_hint(ops, inc, ev)
         ev.update(incident=inc["id"], handling="Opened incident")
         ops.store.put("event", ev)
         names = ", ".join(env.services[s]["name"] for s in services) or "no business service tonight"

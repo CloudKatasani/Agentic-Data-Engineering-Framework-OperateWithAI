@@ -29,6 +29,7 @@ class Service:
         self.client, self.data = client, data
         self.lock = threading.RLock()
         self.runs = 0
+        self.received: dict[str, dict] = {}     # per integration endpoint: how much arrived and when
         self.reset([])
 
     def reset(self, scenarios: list[str], learned: Optional[list[dict]] = None, guided: bool = False) -> None:
@@ -126,6 +127,27 @@ class Service:
             diagnosis.run(ops)
             self._settle()
             return n
+
+    def ingest(self, source: str, payload) -> dict:
+        """Data pushed to an integration endpoint, in the tool's own format. It goes through
+        the same path as collected data: Watch Desk, then triage and the rest."""
+        from .connectors.parsers import PARSERS
+        if source not in PARSERS:
+            raise KeyError(source)
+        with self.lock:
+            ops = self.ops
+            try:
+                new, cleared = watch.run(ops, pushed=[(source, payload)])
+            except (KeyError, TypeError, ValueError, AttributeError) as e:
+                raise Refused(f"The payload is not in the format this endpoint expects ({type(e).__name__}: {e}).")
+            st = self.received.setdefault(source, {"count": 0, "last": None, "alerts": 0})
+            st.update(count=st["count"] + 1, last=datetime.now().isoformat(timespec="seconds"), alerts=st["alerts"] + len(new))
+            triage.run(ops, new)
+            diagnosis.run(ops)
+            self._settle()
+            fresh = [ops.store.need("event", e["id"]) for e in new]
+            return {"accepted": True, "new_alerts": [{"id": e["id"], "message": e["message"], "codes": e["codes"], "handling": e["handling"],
+                                                      "incident": e["incident"]} for e in fresh], "cleared": len(cleared)}
 
     def raise_request(self, cat_id: str, fields: dict, requester: str) -> dict:
         with self.lock:
