@@ -6,7 +6,7 @@
   <title>OpsCrew-OperateWithAI - Managed Data Operations</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2313804b'/><path d='M6 17 h6 l3 -7 l4 13 l3 -6 h4' fill='none' stroke='white' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/></svg>">
   <link rel="stylesheet" href="/static/styles.css?v=2.1.1">
-  <link rel="stylesheet" href="/static/operate.css?v=2.2.0">
+  <link rel="stylesheet" href="/static/operate.css?v=2.3.0">
 </head>
 <body>
   <div class="shell">
@@ -16,12 +16,11 @@
         <div><div class="brand-name">OpsCrew-OperateWithAI</div><div class="brand-sub" id="brandSub">Managed data operations</div></div>
       </div>
       <nav id="nav">
-        <div style="padding:2px 6px 8px"><label style="margin:0 0 4px">You are</label><select id="personPick" aria-label="You are"></select></div>
         <div class="nav-group">Walkthrough</div>
         <a href="#/team" data-route="team"><span class="stepn">1</span>Agents and people</a>
         <a href="#/data" data-route="data"><span class="stepn">2</span>Data needed from tools</a>
         <a href="#/home" data-route="home"><span class="stepn">3</span>Command center</a>
-        <a href="#/inbox" data-route="inbox"><span class="stepn">4</span>My inbox <span id="inboxCount"></span></a>
+        <a href="#/inbox" data-route="inbox"><span class="stepn">4</span>Decisions for people <span id="inboxCount"></span></a>
         <div class="nav-group">Operate</div>
         <a href="#/incidents" data-route="incidents">Incidents</a>
         <a href="#/batch" data-route="batch">Batch and SLA</a>
@@ -46,6 +45,6 @@
   </div>
   <div id="toast"></div>
   <div id="modal" class="modal hidden"><div class="modal-card"><div id="modalBody"></div></div></div>
-  <script src="/static/app.js?v=2.2.0"></script>
+  <script src="/static/app.js?v=2.3.0"></script>
 </body>
 </html>

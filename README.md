@@ -22,12 +22,12 @@ Part of the ADEF suite next to Build-With-AI; the console shares its look and co
 
 Open http://127.0.0.1:8090. It starts a simulated night at a demo client with the
 "typical bad night" preset, paused at the first thing the agents detect: an expired Oracle service account, a duplicate vendor file and,
-later, a Power BI gateway outage. Choose which seat you are in the sidebar (Oracle DBA, Incident Manager, Security Lead ...), answer that inbox, and
+later, a Power BI gateway outage. There is no login or role switch in the demo: every decision button answers as the role the agent asked ("Approve · as the Security Lead"), and you
 move the clock with the buttons at the top.
 
 The sidebar follows the demo order: **1 Agents and people** (who does what), **2 Data needed
-from tools** (what the client provides), **3 Command center** (the live night), **4 My inbox**
-(answer as the Oracle DBA, then as the Security Lead). The **Scenario simulator** page starts other nights.
+from tools** (what the client provides), **3 Command center** (the live night), **4 Decisions for
+people** (everything waiting, grouped by the role that must decide). The **Scenario simulator** page starts other nights.
 
 ```bash
 python -m operatewithai scenarios                      # the ten scenarios
@@ -151,7 +151,7 @@ the live API in this repository's tests.
 
 - `ADEF_API_TOKEN`: when set, every API call needs it as a bearer token.
 - `ADEF_IDENTITY_FILE`: YAML of `sha256(token): Roster Name`. Each person then acts only as themselves.
-  Without it the caller names themselves (`X-Actor`), which is suitable for demos only.
+  Without it the console answers as the role each request is addressed to, which is suitable for demos only.
 
 ## Earlier version
 
