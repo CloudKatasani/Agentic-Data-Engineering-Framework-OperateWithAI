@@ -76,8 +76,8 @@ def _handover(ops) -> str:
     reqs = ops.tickets("request", open_only=True)
     adv = [e for e in ops.store.all("event") if e["status"] == "open" and not e["incident"]]
     L = [f"# Shift handover - {env.client['name']}", f"Prepared by the {NAME} at {ops.now.strftime('%H:%M on %d %b %Y')}.", "",
-         "## Business services", "| Service | Deadline | Estimate | Status |", "|---|---|---|---|"]
-    L += [f"| {s['name']} | {s['deadline'][11:16]} | {s['eta'][11:16]} | {s['status']} |" for s in proj["services"].values()]
+         "## Business services", "| Service | Promise | Now | Status |", "|---|---|---|---|"]
+    L += [f"| {s['name']} | {s['due']} | {s['est']} | {s['status']} |" for s in proj["services"].values()]
     L += ["", f"## Open incidents ({len(open_incs)})"]
     L += [f"- **{i['id']} {i['priority']}** {i['title']} - owner {i['assignee']}. {_next_step(i)}." for i in open_incs] or ["- None."]
     L += ["", f"## Waiting on people ({len(asks)})"]

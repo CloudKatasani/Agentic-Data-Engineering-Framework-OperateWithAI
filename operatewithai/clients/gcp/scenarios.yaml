@@ -1,0 +1,39 @@
+probes:
+  bigquery.quota_usage: {summary: "QueryUsagePerDay: 41% of the custom quota used", facts: {quota_exceeded: false}}
+  dataflow.job_status:  {summary: "df-visits-stream: JOB_STATE_RUNNING, 4 workers, system lag 20 s", facts: {job_failed: false}}
+
+scenarios:
+  - id: G01
+    title: "BigQuery custom daily quota is used up before the dbt build"
+    story: "A backfill run during the day used most of the project's daily query quota. The 02:00 dbt build in Composer fails part-way with a custom quota error."
+    tools: [BigQuery, Cloud Composer, dbt, Looker]
+    expect_ke: KE0320
+    faults:
+      - type: job_error
+        at: "01:50"
+        node: airflow.dag_marts_dbt
+        after: 10
+        fixed_by: bigquery.raise_custom_quota
+        message: "Task run_dbt failed: Database Error in model fct_visits: Custom quota exceeded: Your usage exceeded the custom quota for QueryUsagePerDay, which is set by your administrator."
+        evidence:
+          bigquery.quota_usage: {summary: "QueryUsagePerDay: 100% of the 20 TiB custom quota used; 13.1 TiB by job backfill_visits_2025 (service account sa-backfill) between 14:00 and 19:30", facts: {quota_exceeded: true}}
+  - id: G02
+    title: "Dataflow streaming job is stuck and the Pub/Sub backlog grows"
+    story: "At 03:10 the Dataflow job that moves visit events into BigQuery stops making progress. The subscription backlog grows and the live visits feed goes stale."
+    tools: [Pub/Sub, Dataflow, BigQuery]
+    expect_ke: KE0321
+    faults:
+      - type: stall
+        at: "03:10"
+        node: gcp.sub_visits
+        fixed_by: dataflow.restart_job
+        alert:
+          source: dataflow
+          payload: {name: df-visits-stream, currentState: JOB_STATE_FAILED, detail: "Workflow failed. Causes: The Dataflow job appears to be stuck because no worker activity has been seen in the last 1h."}
+          clear: {name: df-visits-stream, currentState: JOB_STATE_RUNNING}
+        evidence:
+          dataflow.job_status: {summary: "df-visits-stream: JOB_STATE_FAILED at 03:10; workers lost after a zonal resource exhaustion in europe-west1-b", facts: {job_failed: true}}
+
+presets:
+  quiet: {title: "Quiet night", scenarios: []}
+  typical: {title: "Typical bad night", scenarios: [G01, G02]}

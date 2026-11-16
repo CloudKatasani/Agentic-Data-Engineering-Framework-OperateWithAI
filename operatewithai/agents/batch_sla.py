@@ -20,14 +20,14 @@ def run(ops) -> None:
         old, new = prev.get(sid, "on track"), s["status"]
         if new == old:
             continue
-        eta, due = s["eta"][11:16], s["deadline"][11:16]
+        eta, due = s["est"], s["due"]
         why = f" Blocked by {', '.join(s['blocking'])}." if s["blocking"] else ""
-        ops.audit(NAME, f"{sid}: {old} -> {new}", sid, f"ETA {eta}, deadline {due}.{why}")
+        ops.audit(NAME, f"{sid}: {old} -> {new}", sid, f"Now {eta}, promise {due}.{why}")
         if new in SEVERITY and SEVERITY.index(new) > max(SEVERITY.index(old) if old in SEVERITY else 0, 0):
             for role in ("incident_manager", "sdm") if new != "at risk" else ("incident_manager",):
                 ops.notify(env.holder(role), "fyi", None, f"{s['name']}: {new}",
-                           f"Deadline {due}. Current estimate {eta} ({-s['slack_minutes']} min late)." if s["slack_minutes"] < 0 else
-                           f"Deadline {due}. Current estimate {eta} ({s['slack_minutes']} min of slack).{why}",
+                           f"Promise: {due}. Now: {eta} ({-s['slack_minutes']} min over).{why}" if s["slack_minutes"] < 0 else
+                           f"Promise: {due}. Now: {eta} ({s['slack_minutes']} min of slack).{why}",
                            NOTED, NAME, due_minutes=60, role=role.replace("_", " "), data={"service": sid})
     ops.store.kv("service_status", {sid: s["status"] for sid, s in proj["services"].items()})
     for inc in ops.tickets("incident", open_only=True):
@@ -40,11 +40,11 @@ def run(ops) -> None:
             inc["urgency"] = "high"
             worst = min(live, key=lambda s: s["slack_minutes"])
             ops.set_priority(inc, env.priority(inc["impact"], "high"), NAME,
-                             f"{worst['name']} now estimated {worst['eta'][11:16]} against a {worst['deadline'][11:16]} deadline")
+                             f"{worst['name']} is now {worst['est']} against a promise of {worst['due']}")
             if inc["priority"] == "P1" and not inc["major"]:
                 inc["major"] = True
                 ops.save(inc)
                 ops.notify(env.holder("incident_manager"), "major", inc, f"Major incident: {inc['id']} is now P1", 
-                           f"{inc['title']}\nAssigned to {inc['assignee']}. {worst['name']} is estimated {worst['eta'][11:16]} against {worst['deadline'][11:16]}.",
+                           f"{inc['title']}\nAssigned to {inc['assignee']}. {worst['name']} is {worst['est']} against {worst['due']}.",
                            [{"id": "lead", "label": "I am leading this", "style": "primary"}], NAME, due_minutes=15, role="incident manager")
     ops.projection = proj

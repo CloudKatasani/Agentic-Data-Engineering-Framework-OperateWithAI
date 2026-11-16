@@ -17,6 +17,12 @@ RECOVERY = {"kind": "recovery", "title": "Restart failed downstream jobs in depe
 BTN_OK = {"style": "primary"}
 
 
+def rerun_action(ops, job: str) -> str:
+    """The catalogue action that runs this job again, from the technology catalogue."""
+    tool = ops.env.cis[ops.env.nodes[job]["ci"]]["tool"]
+    return ops.kb.rerun.get(tool) or RERUN[job.split(".")[0]]
+
+
 def _owner_role(ops, inc: dict, role: str) -> str:
     if role != "data_owner":
         return role
@@ -97,7 +103,7 @@ def _recover(ops, inc: dict, step: dict) -> bool:
                 step.update(status="failed", result=f"{n['name']} failed again after two restarts: {st['error'][:120]}")
                 return False
             if ready:
-                res = ops.estate.apply(RERUN[job.split(".")[0]], node=job)
+                res = ops.estate.apply(rerun_action(ops, job), node=job)
                 reruns[job] = reruns.get(job, 0) + 1
                 ops.note(inc, NAME, f"Recovery: {res['message']}")
             pending = True

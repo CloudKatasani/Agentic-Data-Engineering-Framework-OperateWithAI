@@ -34,7 +34,6 @@ from ..llm import router
 from ..llm.catalog import FUNCTIONS, PROVIDERS, RULES_ONLY
 from ..llm.providers import LLMError
 from ..service import Service
-from ..sim.scenarios import BY_ID, PRESETS, SCENARIOS
 from . import pipeline
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -118,9 +117,25 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
         return {"version": __version__, "client": env.client, "me": request.state.actor, 
                 "people": [{**p, "tower_name": env.tower_name(p["tower"]) if p.get("tower") else "", "role_text": env.data["roles"].get(p.get("role", ""), "")}
                            for p in env.people],
-                "towers": env.data["towers"], "scenarios": SCENARIOS, "presets": PRESETS, "running": svc.scenarios,
-                "requests": list(ops().kb.requests.values()),
+                "towers": env.data["towers"], **svc.library(), "running": svc.scenarios,
+                "clients": env.clients(), "client_id": svc.client, "requests": _requests(),
                 "nodes": {n["id"]: n["name"] for n in env.nodes.values()}}
+
+    def _requests() -> list[dict]:
+        """The request catalogue, with the rerun choices of the current client's deliverables."""
+        out = []
+        deliverables = [s["delivered_by"] for s in svc.env.services.values() if svc.env.nodes[s["delivered_by"]]["kind"] == "job"]
+        for r in ops().kb.requests.values():
+            out.append({**r, "fields": [{**f, "options": deliverables} if f["id"] == "node" else f for f in r["fields"]]})
+        return out
+
+    def _estate_tools() -> set[str]:
+        tools = {c["tool"] for c in svc.env.cis.values()} | {"servicenow"}
+        return tools | ({"aws", "azure"} & {c.get("cloud") for c in svc.env.cis.values()}) | ({"gcp"} if any(c.get("cloud") == "gcp" for c in svc.env.cis.values()) else set())
+
+    @app.get("/api/sim/library")
+    def sim_library(client: str = ""):
+        return {**svc.library(client or svc.client), "client": next(c for c in svc.env.clients() if c["id"] == (client or svc.client))}
 
     def _inc_row(t: dict) -> dict:
         return {k: t.get(k) for k in ("id", "type", "title", "priority", "state", "tower", "assignee", "opened_at", "ack_at", "resolved_at",
@@ -142,7 +157,7 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
             mine = [i for i in incs if i["tower"] == t["id"] and i["state"] != "Resolved"]
             towers.append({"id": t["id"], "name": t["name"], "on_call": env.on_call(t["id"]), "systems": systems, "incidents": [i["id"] for i in mine],
                            "status": "red" if mine or any(s["status"] == "red" for s in systems) else "amber" if any(s["status"] == "amber" for s in systems) else "green"})
-        return {"now": svc.now.isoformat(), "client": env.client["name"], "services": h["services"], "towers": towers,
+        return {"now": svc.now.isoformat(), "client": env.client["name"], "stack": env.client.get("stack", ""), "services": h["services"], "towers": towers,
                 "incidents": [_inc_row(i) for i in sorted(incs, key=lambda i: (i["state"] == "Resolved", i["priority"], i["opened_at"]))],
                 "waiting": sorted(waiting.items(), key=lambda x: -x[1]), "asks": len(asks),
                 "advisories": [e for e in o.store.all("event") if e["status"] == "open" and not e["incident"]],
@@ -229,7 +244,9 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
     def signals():
         """What each tool must provide for the agents to work, and what arrived tonight."""
         w = ops().store.kv("watch_stats") or {}
-        return {"tools": [{**t, "received": (w.get("by_tool") or {}).get(t["id"], 0)} for t in ops().kb.signals],
+        mine = _estate_tools()
+        return {"client": svc.env.client["name"], "stack": svc.env.client.get("stack", ""),
+                "tools": [{**t, "received": (w.get("by_tool") or {}).get(t["id"], 0), "in_estate": t["id"] in mine} for t in ops().kb.signals],
                 "agents": [a["name"] for a in team.AGENTS], "watch": w,
                 "events": sorted(ops().store.all("event"), key=lambda e: e["first_seen"], reverse=True)[:300]}
 
@@ -315,11 +332,12 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
     @app.get("/api/integrations")
     def integrations(request: Request):
         saved = router.load()["integrations"]
+        mine = _estate_tools()
         base = str(request.base_url).rstrip("/")
         out = []
         for t in ops().kb.endpoints:
             cfg = saved.get(t["id"], {})
-            out.append({"id": t["id"], "tool": t["tool"], "connect": {**t["connect"], "endpoint": cfg.get("endpoint", ""),
+            out.append({"id": t["id"], "tool": t["tool"], "in_estate": t["id"] in mine, "connect": {**t["connect"], "endpoint": cfg.get("endpoint", ""),
                                                                           "credential_ref": cfg.get("credential", t["connect"]["credential"]),
                                                                           "enabled": bool(cfg.get("enabled"))},
                         "inbound": [{**e, "url": f"{base}/api/ingest/{e['id']}", "received": svc.received.get(e["id"])} for e in t["inbound"]]})
@@ -356,14 +374,15 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
     def run_view():
         with svc.lock:
             out = pipeline.build(ops())
-        out["scenarios"] = [BY_ID[s] for s in svc.scenarios]
+        by_id = {s["id"]: s for s in svc.library()["scenarios"]}
+        out["scenarios"] = [by_id[s] for s in svc.scenarios]
         out["prevented"] = svc.world.prevented
         return out
 
     @app.post("/api/sim/start")
     def sim_start(body: dict = Body(...)):
         guided = body.get("mode", "guided") == "guided"
-        svc.restart([str(s) for s in body.get("scenarios", [])], guided=guided)
+        svc.restart([str(s) for s in body.get("scenarios", [])], guided=guided, client=str(body.get("client") or svc.client))
         if body.get("until"):
             svc.run_until(str(body["until"]))
         elif guided:

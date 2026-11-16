@@ -1,0 +1,52 @@
+# AWS warehouse estate: Fivetran and Glue into Redshift, orchestrated by Airflow (MWAA) running
+# dbt, consumed by Tableau and a nightly file extract to a partner. Synthetic.
+client:
+  id: awsdw
+  name: "Calloway Logistics (synthetic demo client)"
+  stack: "Fivetran, S3 file landing, AWS Glue, Airflow (MWAA) with dbt, Amazon Redshift, Tableau, partner file extract on AWS"
+  sim: generic
+  itsm: ServiceNow
+  batch_day_start: "00:30"
+
+towers:
+  - {id: watch,  name: "L1 Watch Desk",                     seat: "L1 Operator"}
+  - {id: ingest, name: "Ingestion - Fivetran, Glue and S3", seat: "Ingestion Engineer"}
+  - {id: dw,     name: "Warehouse - Redshift and Airflow",  seat: "Warehouse Engineer"}
+  - {id: bi,     name: "Consumption - Tableau and extracts", seat: "Consumption Engineer"}
+
+cis:
+  - {id: FIVETRAN,   tool: fivetran, name: "Fivetran connectors",         tower: ingest, cloud: saas}
+  - {id: S3_LANDING, tool: mft,      name: "S3 landing bucket",           tower: ingest, cloud: aws}
+  - {id: GLUE,       tool: glue,     name: "AWS Glue jobs",               tower: ingest, cloud: aws}
+  - {id: MWAA,       tool: airflow,  name: "Airflow (MWAA) environment",  tower: dw,     cloud: aws}
+  - {id: REDSHIFT,   tool: redshift, name: "Redshift cluster dw-prod",    tower: dw,     cloud: aws}
+  - {id: TABLEAU,    tool: tableau,  name: "Tableau Cloud site",          tower: bi,     cloud: saas}
+
+nodes:
+  - {id: src.salesforce,             ci: FIVETRAN,   kind: source,  name: "Salesforce accounts and orders"}
+  - {id: fivetran.salesforce,        ci: FIVETRAN,   kind: job,     name: "Fivetran connector salesforce_prod", ref: salesforce_prod, planned: "00:45", duration: 30}
+  - {id: rs.raw.salesforce,          ci: REDSHIFT,   kind: dataset, name: "raw_salesforce"}
+  - {id: s3.carrier_file,            ci: S3_LANDING, kind: file,    name: "carrier_events_YYYYMMDD.parquet", ref: carrier_events, expected_by: "01:30", partner: "the carrier network"}
+  - {id: glue.curate_shipments,      ci: GLUE,       kind: job,     name: "Glue job glue_curate_shipments", ref: glue_curate_shipments, planned: "01:45", duration: 35}
+  - {id: rs.raw.shipments,           ci: REDSHIFT,   kind: dataset, name: "raw_shipments"}
+  - {id: airflow.dag_marts_dbt,      ci: MWAA,       kind: job,     name: "Airflow DAG dag_marts_dbt (dbt build on Redshift)", ref: dag_marts_dbt, planned: "02:45", duration: 50, requires: [REDSHIFT]}
+  - {id: rs.mart.shipments,          ci: REDSHIFT,   kind: dataset, name: "marts.fct_shipments", table: "marts.fct_shipments"}
+  - {id: tableau.shipments_daily,    ci: TABLEAU,    kind: job,     name: "Tableau extract refresh Shipments Daily", ref: "Shipments Daily", planned: "05:00", duration: 25}
+  - {id: airflow.dag_partner_extract, ci: MWAA,      kind: job,     name: "Airflow DAG dag_partner_extract", ref: dag_partner_extract, planned: "04:30", duration: 20}
+
+edges:
+  - [src.salesforce, fivetran.salesforce]
+  - [fivetran.salesforce, rs.raw.salesforce]
+  - [s3.carrier_file, glue.curate_shipments]
+  - [glue.curate_shipments, rs.raw.shipments]
+  - [rs.raw.salesforce, airflow.dag_marts_dbt]
+  - [rs.raw.shipments, airflow.dag_marts_dbt]
+  - [airflow.dag_marts_dbt, rs.mart.shipments]
+  - [rs.mart.shipments, tableau.shipments_daily]
+  - [rs.mart.shipments, airflow.dag_partner_extract]
+
+services:
+  - {id: BS-SHIP-DASH, name: "Shipments Daily dashboard", pattern: "BI dashboard (Tableau)", delivered_by: tableau.shipments_daily, deadline: "06:30", tier: 1,
+     owner_role: data_owner, audience: "Operations control tower"}
+  - {id: BS-PARTNER-EXTRACT, name: "Partner shipment extract", pattern: "File extract / data share to a partner", delivered_by: airflow.dag_partner_extract, deadline: "06:30", tier: 1,
+     owner_role: data_owner, audience: "Carrier partners (contractual delivery time)"}

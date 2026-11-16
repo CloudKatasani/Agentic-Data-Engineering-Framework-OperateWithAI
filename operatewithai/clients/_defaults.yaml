@@ -1,0 +1,33 @@
+# The service model shared by every client unless its own file overrides a section.
+roles:
+  incident_manager:     "Runs major incidents; approves every stakeholder message"
+  sdm:                  "Owns the service and its SLAs; approves cost decisions and service reports"
+  dba_lead:             "Approves database changes: space, sessions, DDL in production"
+  bi_lead:              "Approves restarts of shared BI services"
+  change_manager:       "Approves emergency changes"
+  security_lead:        "Approves account, credential and access actions"
+  data_owner_finance:   "Decides on finance data: reloads, publishing with known issues, access"
+  data_owner_claims:    "Decides on claims data: reloads, publishing with known issues, access"
+  data_owner:           "Decides on the business data: reloads, publishing with known issues, access"
+  client_service_owner: "Receives major incident communications for the client"
+
+decision_seats:
+  - {name: "Incident Manager",         title: "Managed service", role: incident_manager}
+  - {name: "Service Delivery Manager", title: "Managed service", role: sdm}
+  - {name: "DBA Lead",                 title: "Managed service", role: dba_lead}
+  - {name: "BI Lead",                  title: "Managed service", role: bi_lead}
+  - {name: "Change Manager",           title: "Managed service", role: change_manager}
+  - {name: "Security Lead",            title: "Managed service", role: security_lead}
+  - {name: "Data Owner",               title: "Client",          role: data_owner}
+  - {name: "Client Service Owner",     title: "Client",          role: client_service_owner}
+
+priority_matrix:   # impact x urgency -> priority
+  high:   {high: P1, medium: P2, low: P3}
+  medium: {high: P2, medium: P3, low: P4}
+  low:    {high: P3, medium: P4, low: P4}
+
+sla_policy:        # minutes
+  P1: {respond: 15,   resolve: 240}
+  P2: {respond: 30,   resolve: 480}
+  P3: {respond: 240,  resolve: 4320}
+  P4: {respond: 1440, resolve: 7200}

@@ -1,9 +1,20 @@
 # OpsCrew-OperateWithAI
 
 AI agents and a human team running a **data platform managed service** together: monitoring,
-incidents, the nightly batch, service requests and service reporting for a client estate of
-**Oracle, IBM Db2, Oracle GoldenGate, Informatica, Snowflake, dbt, Denodo, Power BI, Cognos,
-Dynatrace, AWS/Azure and file-transfer integrations**, with ServiceNow as the system of record.
+incidents, the nightly batch, streaming freshness, service requests and service reporting, for
+whatever stack the client runs. ServiceNow stays the system of record.
+
+| Layer | Supported out of the box (28 technologies) |
+|---|---|
+| Sources and CDC | Oracle, IBM Db2, Oracle GoldenGate, Fivetran (and similar), Kafka / Confluent / MSK / Event Hubs, Pub/Sub, file transfer and object storage landing |
+| Ingestion and orchestration | Informatica, Azure Data Factory / Synapse pipelines, AWS Glue, Airflow (MWAA, Composer, Astronomer), Dataflow, anything that emits OpenLineage |
+| Warehouse and lakehouse | Snowflake, Amazon Redshift, Google BigQuery, Databricks, dbt, Denodo |
+| Data quality | Elementary, Soda, Great Expectations, dbt tests (freshness, volume, schema, test failures) |
+| Consumption | Power BI, Tableau, Looker, Cognos, reverse ETL (Hightouch, Census), ML scoring jobs, partner extracts, data APIs |
+| Cloud and monitoring | AWS, Azure, Google Cloud, Dynatrace |
+
+A technology is a YAML entry (`knowledge/tech.yaml`): the feeds it must provide, how its events
+look, the error patterns to recognise and the action that reruns its jobs. Adding one needs no code.
 
 The agents do the watching, correlating, checking, drafting and the execution of agreed
 runbook steps. **People make every decision** that changes the client's systems, spends money,
@@ -33,6 +44,26 @@ people** (everything waiting, grouped by the role that must decide). The **Scena
 python -m operatewithai scenarios                      # the ten scenarios
 python -m operatewithai night --scenarios S01,S06      # run a night in the terminal with nobody answering
 pytest -q
+```
+
+## Four demo client estates
+
+The simulator runs any of these; pick one on the **Scenario simulator** page or with `--client`.
+
+| Client (synthetic) | Stack | Consumption patterns | Scenarios |
+|---|---|---|---|
+| `demo` Aldermoor Insurance | Oracle, Db2, GoldenGate, Informatica, Snowflake, dbt, Denodo, Power BI, Cognos | Dashboards, regulated scheduled reports | 10 |
+| `lakehouse` Northbridge Retail | ADF, Kafka, Databricks, data quality checks, Power BI on Azure | Dashboard, ML batch scoring, reverse ETL to CRM, near-real-time data API | 5 |
+| `awsdw` Calloway Logistics | Fivetran, S3, Glue, Airflow with dbt, Redshift, Tableau on AWS | Dashboard, contractual file extract to partners | 4 |
+| `gcp` Verity Clinics | Pub/Sub, Dataflow, BigQuery, Composer with dbt, Looker | Scheduled BI delivery, near-real-time operational feed | 2 |
+
+Two kinds of promise are tracked: a **deadline** ("the dashboard is refreshed by 07:00") and a
+**freshness promise** ("the order API is never more than 10 minutes behind"). A failed data
+quality check holds the consumer back instead of publishing wrong numbers.
+
+```bash
+./run.sh --client lakehouse
+python -m operatewithai benchmark     # inject all 21 faults, grade triage and diagnosis against the injected cause
 ```
 
 ## Live run, step by step
@@ -126,13 +157,28 @@ Controls that hold everywhere:
 - Agents work from job status, logs and metadata. Log text is treated as untrusted data.
 - Every agent action and human decision is in a hash-chained audit log.
 
+## Patterns taken from open-source projects
+
+Reviewed on GitHub and applied where they fit (the review was limited to what those projects
+publish in their repositories):
+
+| Project | Pattern adopted here |
+|---|---|
+| keephq/keep | Fingerprint de-duplication where firing and resolved states share a fingerprint; maintenance windows that are re-checked when they end (an alert still open after a change window goes to triage) |
+| OpenLineage, Marquez | `POST /api/ingest/openlineage` accepts RunEvents (START, COMPLETE, FAIL, ABORT with the errorMessage facet), so any engine that emits them is covered |
+| Elementary, Soda, Great Expectations | Data quality failures classified as freshness, volume, schema or test, each mapped to a known error |
+| DataHub | A consumer is held back when its input has an open quality incident |
+| k8sgpt, HolmesGPT | Deterministic checks first, a model only afterwards and only as a suggestion; read-only investigation; client text redacted before any model call |
+| StackStorm, Grafana OnCall | Approvals addressed to a role with a response time, then an ordered escalation chain |
+| Arvo-AI/aurora | Fault-injection benchmark: inject a known fault, give the agents only the alerts, grade against the injected cause |
+
 ## Using it for a real client
 
 The demo runs against a simulated estate so it can be tried without access to anything. For a
 client engagement:
 
-1. Replace `clients/demo/environment.yaml` with the client's systems, lineage, deliverables,
-   support seats and SLAs.
+1. Copy the closest client under `clients/` and describe the real systems, lineage, deliverables
+   and support towers. Technologies not yet in `knowledge/tech.yaml` are added there.
 2. Give the agents the feeds listed on the **Data needed from tools** page (for example `REP_WFLOW_RUN`, GoldenGate Admin Service, dbt Cloud webhooks,
    Power BI refresh history, the Cognos audit database, Dynatrace problem notifications). The
    parsers already accept those tools' formats; the transport and the action adapters are the

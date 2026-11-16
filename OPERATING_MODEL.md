@@ -27,9 +27,10 @@ If a person does not answer in time, the ask goes to the incident manager and th
 *L1 monitoring, every tool, every 5 minutes.* See everything the tools report and pass on only what needs a decision.
 
 Responsibilities:
-- Reads Oracle, Db2, GoldenGate, Informatica, Snowflake, dbt, Denodo, Power BI, Cognos, Dynatrace, AWS/Azure and file-transfer status in each tool's own format
+- Reads every connected tool in its own format: databases, replication and CDC, ingestion, orchestration, warehouses and lakehouses, streaming, data quality, BI and cloud monitoring
+- Accepts OpenLineage run events, so any engine that emits them is covered without a dedicated connector
 - Merges repeats of the same alert and closes alerts when the tool reports recovery
-- Suppresses alerts on a system that is inside an approved change window
+- Suppresses alerts on a system that is inside an approved change window, and looks at them again if they are still open when the window closes
 - Escalates any request to a person that passes its response time
 
 May do alone: Reading, de-duplicating, suppressing during approved changes, escalating.
@@ -47,7 +48,7 @@ Brings in:
 Responsibilities:
 - Recognises alerts from different tools that share a cause (one expired password seen by GoldenGate and Informatica is one incident)
 - Attaches downstream failures to the incident that caused them using the data chain, instead of opening new tickets
-- Works out which business services and deadlines are exposed
+- Works out which business services are exposed, whatever the consumption pattern: dashboards, scheduled reports, ML scoring, reverse ETL, partner extracts, data APIs
 - Sets impact, urgency and priority from the client's matrix and starts the SLA clocks
 - Assigns the on-call engineer of the owning tower
 
@@ -64,7 +65,8 @@ Brings in:
 *L2 analysis.* Tell the engineer what is wrong and show the evidence.
 
 Responsibilities:
-- Matches the error signature to the known error database
+- Matches the error signature to the known error database (deterministic first; a model only suggests when nothing matches)
+- Classifies data quality failures as freshness, volume, schema or test failures
 - Runs that entry's read-only checks (process reports, session logs, lock history, account status, host metrics) and records each result
 - Checks the change calendar for recent changes on the system
 - Says so plainly when the error is not known or the checks disagree, and gathers the standard facts instead
@@ -111,6 +113,8 @@ Brings in:
 Responsibilities:
 - Tracks every job of the nightly batch against plan
 - Projects the finish time of each business service through the data chain, including the time fixes and reruns will take
+- Tracks freshness promises for streams and near-real-time feeds (never more than N minutes behind) alongside morning deadlines
+- Holds a consumer back when its input failed a data quality check, instead of publishing wrong numbers
 - Raises the urgency and priority of the incident that puts a deadline at risk
 - Declares the risk early: at risk, breach predicted, breached
 

@@ -26,7 +26,7 @@ def _pir(ops, inc: dict) -> str:
     by_agent = sum(1 for s in steps if s["kind"] in ("action", "verify", "recovery") and s["status"] == "done")
     by_people = sum(1 for s in steps if s["kind"] == "manual" and s["status"] == "done")
     approvals = [f"- Step {s['n']} approved by the {s['approved_by']}" for s in steps if s.get("approved_by")]
-    svc = [f"- {s['name']}: {s['status']} (due {s['deadline'][11:16]}, estimate or actual {s['eta'][11:16]})"
+    svc = [f"- {s['name']}: {s['status']} (promised {s['due']}, actual or estimate {s['est']})"
            for sid, s in (ops.projection.get("services") or {}).items() if sid in inc["services"]]
     late = [t for t in inc["timeline"] if "escalated" in t["text"]]
     improve = ([f"- {len(late)} request(s) to people passed their response time and were escalated."] if late else []) + \
@@ -74,7 +74,7 @@ def run(ops) -> None:
             tonight = sum(1 for t in ops.tickets("incident") if t["ke"] == ke["id"])
             exists = any(p["ke"] == ke["id"] for p in ops.tickets("problem"))
             if past + tonight >= 2 and not exists:
-                p = ops.open_ticket("problem", f"Recurring: {ke['title']}", "P3", ke["tower"], NAME, ke=ke["id"], impact="medium", urgency="low",
+                p = ops.open_ticket("problem", f"Recurring: {ke['title']}", "P3", inc["tower"], NAME, ke=ke["id"], impact="medium", urgency="low",
                                     occurrences=past + tonight, permanent_fix=ke["permanent_fix"], incidents=[inc["id"]], stage="proposed")
                 ops.note(p, NAME, f"{past} time(s) in the last 30 days plus {inc['id']} tonight. Proposed permanent fix: {ke['permanent_fix']}")
                 ops.notify(ops.env.holder("sdm"), "problem", p, f"Recurring problem: {ke['title']} ({past + tonight} times in 30 days)",

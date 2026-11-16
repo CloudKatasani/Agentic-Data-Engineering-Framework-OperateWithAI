@@ -36,7 +36,27 @@ class Environment:
 
     @classmethod
     def load(cls, client: str = "demo") -> "Environment":
-        return cls(yaml.safe_load((CLIENTS_DIR / client / "environment.yaml").read_text("utf-8")))
+        data = yaml.safe_load((CLIENTS_DIR / client / "environment.yaml").read_text("utf-8"))
+        defaults = yaml.safe_load((CLIENTS_DIR / "_defaults.yaml").read_text("utf-8"))
+        for key, value in defaults.items():          # priority matrix, SLAs, decision roles: same service model for every client
+            data.setdefault(key, value)
+        if "people" not in data:                     # one on-call seat per tower, plus the shared decision roles
+            data["people"] = [{"name": t["seat"], "title": f"On call, {t['name']}", "tower": t["id"], "on_call": True} for t in data["towers"]] + defaults["decision_seats"]
+        data.setdefault("changes", [])
+        return cls(data)
+
+    @staticmethod
+    def clients() -> list[dict]:
+        out = []
+        for d in sorted(CLIENTS_DIR.iterdir()):
+            if (d / "environment.yaml").exists():
+                c = yaml.safe_load((d / "environment.yaml").read_text("utf-8"))["client"]
+                out.append({"id": d.name, "name": c["name"], "stack": c.get("stack", ""), "sim": c.get("sim", "classic")})
+        return sorted(out, key=lambda c: c["id"] != "demo")
+
+    def service_due(self, sid: str) -> str:
+        s = self.services[sid]
+        return f"due {s['deadline']}" if s.get("deadline") else f"fresh within {s['max_lag_minutes']} min"
 
     # -- graph ------------------------------------------------------------------------------
     def _walk(self, start: str, graph: dict[str, list[str]]) -> list[str]:

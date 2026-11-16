@@ -1,0 +1,65 @@
+probes:
+  redshift.disk_usage:       {summary: "dw-prod: 61% disk used", facts: {disk_full: false}}
+  redshift.top_queries:      {summary: "No query is using unusual temporary space", facts: {runaway_query: false}}
+  fivetran.connector_status: {summary: "salesforce_prod: connected, last sync succeeded", facts: {auth_failed: false}}
+  glue.job_metrics:          {summary: "glue_curate_shipments: peak executor memory 61% of limit", facts: {memory_exhausted: false}}
+
+scenarios:
+  - id: A01
+    title: "Redshift runs out of disk during the dbt build"
+    story: "An analyst's cross join started at 02:20 and is spilling to disk. At 02:55 the cluster is full and the dbt build in Airflow fails with Disk Full."
+    tools: [Amazon Redshift, Airflow, dbt, Tableau, Partner extract]
+    expect_ke: KE0310
+    faults:
+      - type: job_error
+        at: "02:40"
+        node: airflow.dag_marts_dbt
+        after: 10
+        fixed_by: redshift.cancel_query
+        message: "Task run_dbt failed: Database Error in model fct_shipments (models/marts/fct_shipments.sql): ERROR: Disk Full Detail: error: Disk Full context: node: 2 query: 4410127 location: fdisk_api.cpp"
+        alert:
+          source: redshift
+          payload: {cluster: dw-prod, status: DISK_FULL, detail: "PercentageDiskSpaceUsed 99.6% for 10 minutes"}
+          clear: {cluster: dw-prod, status: HEALTHY, detail: "PercentageDiskSpaceUsed 63%"}
+        evidence:
+          redshift.disk_usage: {summary: "dw-prod: 99.6% disk used, up from 61% at 02:15", facts: {disk_full: true}}
+          redshift.top_queries: {summary: "Query 4409981 by user analyst_ro (running since 02:20) holds 38% of cluster disk in temporary blocks: join without a join condition on fct_shipments", facts: {runaway_query: true}}
+  - id: A02
+    title: "Carrier file misses its cutoff"
+    story: "The carrier network's file is due on S3 by 01:30 and arrives at 03:10. Nothing is broken on the client side; the Glue job waits and the night has to be re-planned."
+    tools: [S3, AWS Glue, Airflow, Tableau, Partner extract]
+    expect_ke: KE0009
+    faults:
+      - {type: file_late, at: "00:35", node: s3.carrier_file, arrives: "03:10"}
+  - id: A03
+    title: "Fivetran cannot log in to Salesforce"
+    story: "The Salesforce integration user's refresh token was revoked in a security clean-up. The 00:45 sync fails and the warehouse has yesterday's accounts and orders."
+    tools: [Fivetran, Amazon Redshift, Airflow, Tableau]
+    expect_ke: KE0311
+    faults:
+      - type: job_error
+        at: "00:35"
+        node: fivetran.salesforce
+        fixed_by: fivetran.reauthorize
+        message: "INVALID_LOGIN: Authentication failed. The refresh token has expired or been revoked."
+        evidence:
+          fivetran.connector_status: {summary: "salesforce_prod: broken since 00:45, setup test 'Validating credentials' fails; Salesforce login history shows the token revoked yesterday 17:12 by an admin", facts: {auth_failed: true}}
+  - id: A04
+    title: "Glue job runs out of memory on a triple-size file"
+    story: "Peak season: the carrier file is three times its usual size and the Glue job's executors are killed for exceeding memory."
+    tools: [AWS Glue, Amazon Redshift, Airflow, Tableau]
+    expect_ke: KE0312
+    faults:
+      - type: job_error
+        at: "01:40"
+        node: glue.curate_shipments
+        after: 15
+        fixed_by: glue.start_job_run_scaled
+        message: "An error occurred while calling o131.pyWriteDynamicFrame. Job aborted due to stage failure: ExecutorLostFailure (executor 4 exited caused by one of the running tasks) Reason: Container killed by YARN for exceeding memory limits. 5.5 GB of 5.5 GB physical memory used."
+        evidence:
+          glue.job_metrics: {summary: "glue_curate_shipments: executor memory at 100% before each loss; input 14.2 GB against a 30-day average of 4.6 GB; 5 G.1X workers", facts: {memory_exhausted: true}}
+
+presets:
+  quiet: {title: "Quiet night", scenarios: []}
+  typical: {title: "Typical bad night", scenarios: [A03, A01]}
+  everything: {title: "Everything at once", scenarios: [A01, A03, A04]}

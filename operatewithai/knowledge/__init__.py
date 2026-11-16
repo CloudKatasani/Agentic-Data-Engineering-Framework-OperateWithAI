@@ -19,13 +19,20 @@ def _load(name: str) -> dict:
 class KB:
     def __init__(self, store=None):
         self.store = store
-        self.base = _load("kedb.yaml")["known_errors"]
+        self.base = _load("kedb.yaml")["known_errors"] + _load("kedb_stacks.yaml")["known_errors"]
         acts = _load("actions.yaml")
         self.actions = {a["id"]: a for a in acts["actions"]}
         self.never = acts["never"]
         self.requests = {r["id"]: r for r in _load("requests.yaml")["catalogue"]}
-        self.signals = _load("signals.yaml")["tools"]
-        self.endpoints = _load("endpoints.yaml")["tools"]
+        self.tech = _load("tech.yaml")["technologies"]
+        # one list of tools for the onboarding checklist and one for the integration endpoints
+        self.signals = _load("signals.yaml")["tools"] + [{k: t[k] for k in ("id", "tool", "access", "feeds", "category", "clouds")} for t in self.tech]
+        self.endpoints = _load("endpoints.yaml")["tools"] + [
+            {"id": t["id"], "tool": t["tool"], "connect": t["connect"],
+             "inbound": [{"id": e["id"], "feed": e["feed"], "format": "json", "sample": e["sample"]} for e in t["events"]]} for t in self.tech]
+        self.event_specs = {e["id"]: {**e, "tech": t["id"]} for t in self.tech for e in t["events"]}
+        self.patterns = [p for t in self.tech for p in t.get("patterns", [])]
+        self.rerun = {t["id"]: t["rerun"] for t in self.tech if t.get("rerun")}
 
     def known_errors(self) -> list[dict]:
         learned = self.store.all("ke") if self.store else []

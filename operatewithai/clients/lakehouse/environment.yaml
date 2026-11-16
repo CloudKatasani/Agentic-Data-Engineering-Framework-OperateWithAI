@@ -1,0 +1,71 @@
+# Azure lakehouse estate: ADF and Kafka into Databricks, consumed by a dashboard, an ML
+# scoring job, a reverse-ETL sync into the CRM and a near-real-time data API. Synthetic.
+client:
+  id: lakehouse
+  name: "Northbridge Retail (synthetic demo client)"
+  stack: "Azure Data Factory, Kafka, Databricks lakehouse, data quality checks, Power BI, ML scoring, reverse ETL, data API on Azure"
+  sim: generic
+  itsm: ServiceNow
+  batch_day_start: "00:30"
+
+towers:
+  - {id: watch,  name: "L1 Watch Desk",                 seat: "L1 Operator"}
+  - {id: ingest, name: "Ingestion - ADF and Kafka",     seat: "Ingestion Engineer"}
+  - {id: lake,   name: "Lakehouse - Databricks",        seat: "Databricks Engineer"}
+  - {id: bi,     name: "Consumption - BI, API and CRM", seat: "Consumption Engineer"}
+  - {id: cloud,  name: "Cloud - Azure",                 seat: "Cloud Engineer"}
+
+cis:
+  - {id: ADF_PRD,     tool: adf,          name: "Azure Data Factory adf-prod",            tower: ingest, cloud: azure}
+  - {id: SHIR_VM,     tool: azure,        name: "Self-hosted integration runtime VM",     tower: cloud,  host: ir-onprem-01, cloud: azure}
+  - {id: KAFKA_PRD,   tool: kafka,        name: "Kafka cluster and Connect",              tower: ingest, cloud: azure}
+  - {id: DBX_PRD,     tool: databricks,   name: "Databricks workspace prod",              tower: lake,   cloud: azure}
+  - {id: DQ_CHECKS,   tool: data_quality, name: "Data quality checks (Elementary)",       tower: lake,   cloud: azure}
+  - {id: PBI_SERVICE, tool: powerbi,      name: "Power BI service",                       tower: bi,     cloud: azure}
+  - {id: RETL,        tool: reverse_etl,  name: "Reverse ETL to CRM",                     tower: bi,     cloud: saas}
+
+nodes:
+  - {id: src.erp,                ci: ADF_PRD,     kind: source,  name: "ERP sales tables (on-premises SQL Server)"}
+  - {id: adf.pl_erp_ingest,      ci: ADF_PRD,     kind: job,     name: "ADF pipeline pl_erp_ingest", ref: pl_erp_ingest, planned: "01:00", duration: 40, requires: [SHIR_VM]}
+  - {id: lake.bronze.erp,        ci: DBX_PRD,     kind: dataset, name: "bronze.erp_sales"}
+  - {id: kafka.orders,           ci: KAFKA_PRD,   kind: stream,  name: "Kafka orders.v1 into the lakehouse", ref: cg-orders-lakehouse, max_lag_minutes: 10, resource: sink-orders-adls}
+  - {id: lake.silver.orders_rt,  ci: DBX_PRD,     kind: dataset, name: "silver.orders_rt (streaming table)"}
+  - {id: dbx.job_silver_sales,   ci: DBX_PRD,     kind: job,     name: "Databricks job job_silver_sales", ref: job_silver_sales, planned: "02:00", duration: 45}
+  - {id: lake.silver.sales,      ci: DBX_PRD,     kind: dataset, name: "silver.sales"}
+  - {id: dbx.job_gold_sales,     ci: DBX_PRD,     kind: job,     name: "Databricks job job_gold_sales", ref: job_gold_sales, planned: "03:00", duration: 40}
+  - {id: lake.gold.sales_mart,   ci: DQ_CHECKS,   kind: dataset, name: "gold.sales_mart", table: "analytics.gold.sales_mart"}
+  - {id: pbi.sales_daily,        ci: PBI_SERVICE, kind: job,     name: "Power BI refresh: Sales Daily", planned: "05:00", duration: 20}
+  - {id: dbx.job_features,       ci: DBX_PRD,     kind: job,     name: "Databricks job job_customer_features", ref: job_customer_features, planned: "04:00", duration: 30}
+  - {id: lake.features.customer, ci: DBX_PRD,     kind: dataset, name: "features.customer (feature table)"}
+  - {id: dbx.job_churn_scoring,  ci: DBX_PRD,     kind: job,     name: "Databricks job job_churn_scoring", ref: job_churn_scoring, planned: "04:45", duration: 30}
+  - {id: lake.gold.churn_scores, ci: DBX_PRD,     kind: dataset, name: "gold.churn_scores"}
+  - {id: retl.crm_sync,          ci: RETL,        kind: job,     name: "Reverse ETL sync crm_audience_sync", ref: crm_audience_sync, planned: "06:00", duration: 15}
+
+edges:
+  - [src.erp, adf.pl_erp_ingest]
+  - [adf.pl_erp_ingest, lake.bronze.erp]
+  - [lake.bronze.erp, dbx.job_silver_sales]
+  - [dbx.job_silver_sales, lake.silver.sales]
+  - [lake.silver.sales, dbx.job_gold_sales]
+  - [dbx.job_gold_sales, lake.gold.sales_mart]
+  - [lake.gold.sales_mart, pbi.sales_daily]
+  - [lake.silver.sales, dbx.job_features]
+  - [dbx.job_features, lake.features.customer]
+  - [lake.features.customer, dbx.job_churn_scoring]
+  - [dbx.job_churn_scoring, lake.gold.churn_scores]
+  - [lake.gold.churn_scores, retl.crm_sync]
+  - [kafka.orders, lake.silver.orders_rt]
+
+services:
+  - {id: BS-SALES-DASH, name: "Sales Daily dashboard", pattern: "BI dashboard (Power BI)", delivered_by: pbi.sales_daily, deadline: "07:00", tier: 1,
+     owner_role: data_owner, audience: "Commercial leadership, store operations"}
+  - {id: BS-CHURN-SCORES, name: "Customer churn scores", pattern: "ML batch scoring", delivered_by: dbx.job_churn_scoring, deadline: "06:30", tier: 2,
+     owner_role: data_owner, audience: "Marketing data science"}
+  - {id: BS-CRM-SYNC, name: "CRM audience sync", pattern: "Reverse ETL into a business application", delivered_by: retl.crm_sync, deadline: "07:30", tier: 2,
+     owner_role: data_owner, audience: "CRM campaign team"}
+  - {id: BS-ORDER-API, name: "Order status data API", pattern: "Data product API (near real time)", delivered_by: lake.silver.orders_rt, max_lag_minutes: 10, tier: 1,
+     owner_role: data_owner, audience: "Customer service app, web shop"}
+
+changes:
+  - {id: CHG0041120, ci: ADF_PRD, summary: "ERP upgrade: new column loyalty_tier on SALES_ORDER_LINE",
+     window_start: "2026-03-02 20:00", window_end: "2026-03-02 22:00", requested_by: "ERP application team"}

@@ -441,3 +441,97 @@ def test_alert_inside_a_pushed_change_window_is_suppressed():
     svc.ingest("servicenow_change", {"number": "CHG1", "cmdb_ci": "COGNOS_PRD", "short_description": "Fix pack", "start_date": "2026-03-03 00:00", "end_date": "2026-03-03 08:00"})
     svc.ingest("cognos", {"COGIPF_REPORTNAME": "Claims Aging", "COGIPF_STATUS": "Failure", "COGIPF_ERRORDETAILS": "DPR-ERR-2109 The dispatcher cannot service the request"})
     assert incidents(svc) == [] and svc.store.all("event")[-1]["status"] == "suppressed"
+
+
+# ------------------------------------------------------------------ any stack: other client estates
+def stack_night(client, ids, until=None, guided=False):
+    svc = Service(client)
+    svc.restart(ids, guided=guided)
+    if until:
+        svc.run_until(until)
+    return svc
+
+
+def test_benchmark_every_injected_cause_is_isolated_and_diagnosed():
+    from operatewithai.benchmark import grade
+    rows = grade()
+    assert {r["client"] for r in rows} == {"demo", "lakehouse", "awsdw", "gcp"} and len(rows) >= 21
+    assert [r for r in rows if not r["ok"]] == []
+
+
+@pytest.mark.parametrize("client,sid", [("lakehouse", s) for s in ("L01", "L02", "L03", "L04", "L05")] + [("awsdw", s) for s in ("A01", "A02", "A03", "A04")]
+                         + [("gcp", "G01"), ("gcp", "G02")])
+def test_other_stacks_recover_with_people_answering(client, sid):
+    svc = stack_night(client, [sid], guided=True)
+    svc.run_to_first_issue()
+    for _ in range(500):
+        if not answer(svc, skip=()) and not svc.run_to_next():
+            break
+    (inc,) = incidents(svc)
+    assert inc["state"] == "Resolved", inc["timeline"][-3:]
+    assert all(s["status"] in ("delivered", "on track") for s in svc.ops.projection["services"].values()), svc.ops.projection["services"]
+    assert svc.store.audit_verify()
+
+
+def test_freshness_promise_is_tracked_like_a_deadline():
+    svc = stack_night("lakehouse", ["L03"], "04:00")
+    api = svc.ops.projection["services"]["BS-ORDER-API"]
+    assert api["kind"] == "freshness" and api["status"] == "breached" and "min behind" in api["est"]
+    (inc,) = incidents(svc)
+    assert inc["priority"] == "P1" and inc["services"] == ["BS-ORDER-API"] and inc["ke"] == "KE0303"
+    assert {svc.store.need("event", e)["check"] for e in inc["events"]} == {"state", "lag"}      # connector state and consumer lag: one incident
+    assert svc.ops.projection["services"]["BS-SALES-DASH"]["blocking"] == []       # the batch chain is not touched
+
+
+def test_failed_quality_check_holds_the_consumer_back():
+    svc = stack_night("lakehouse", ["L05"], "05:30")
+    assert all(j["state"] == "succeeded" for n, j in svc.world.jobs.items() if n.startswith(("adf", "dbx")))      # nothing failed
+    assert svc.world.jobs["pbi.sales_daily"]["state"] == "waiting"                                               # but the dashboard is held
+    (inc,) = incidents(svc)
+    assert inc["ke"] == "KE0306" and inc["diagnosis"]["status"] == "confirmed"
+    svc.act(ask(svc, "plan")["id"], "Databricks Engineer", "accept")
+    assert ask(svc, "approve")["to"] == "Data Owner" and svc.world.actions == []
+
+
+def test_any_engine_can_report_through_openlineage_and_quality_tools():
+    svc = stack_night("lakehouse", [], "01:00")
+    r = svc.ingest("openlineage", {"eventType": "FAIL", "job": {"namespace": "prod", "name": "job_silver_sales"},
+                                   "run": {"runId": "x", "facets": {"errorMessage": {"message": "java.lang.OutOfMemoryError: GC overhead limit exceeded"}}}})
+    assert r["new_alerts"][0]["codes"] == ["DBX_DRIVER_OOM"]
+    (inc,) = incidents(svc)
+    assert inc["ke"] == "KE0331" and inc["tower"] == "lake" and set(inc["services"]) == {"BS-SALES-DASH", "BS-CHURN-SCORES", "BS-CRM-SYNC"}
+    r = svc.ingest("data_quality", {"table": "analytics.gold.sales_mart", "test_type": "schema_changes", "status": "fail", "description": "column region removed"})
+    assert r["new_alerts"][0]["codes"] == ["DQ_SCHEMA"]
+    assert svc.ingest("openlineage", {"eventType": "COMPLETE", "job": {"name": "job_silver_sales"}, "run": {"runId": "x"}})["cleared"] == 1
+    assert svc.ingest("airflow", {"dag_id": "not_in_this_estate", "state": "failed"})["new_alerts"] == []   # this client has no Airflow
+
+
+def test_alert_still_open_after_a_change_window_is_triaged():
+    svc = stack_night("gcp", [], "01:00")
+    svc.ingest("servicenow_change", {"number": "CHG9", "cmdb_ci": "LOOKER", "short_description": "Looker upgrade", "start_date": "2026-03-03 00:00", "end_date": "2026-03-03 02:00"})
+    svc.ingest("looker", {"name": "Clinic Activity Daily", "status": "failure", "message": "PDT build failed"})
+    assert incidents(svc) == []
+    svc.run_until("02:15")
+    assert len(incidents(svc)) == 1
+    assert len(incidents(svc)) == 1
+
+
+def test_console_switches_client_estate(owai_home):
+    from fastapi.testclient import TestClient
+
+    from operatewithai.api.app import create_app
+    c = TestClient(create_app(night([], "00:40")))
+    meta = c.get("/api/meta").json()
+    assert [x["id"] for x in meta["clients"]] == ["demo", "awsdw", "gcp", "lakehouse"] and meta["client_id"] == "demo"
+    assert c.get("/api/sim/library?client=awsdw").json()["scenarios"][0]["id"] == "A01"
+    assert c.post("/api/sim/start", json={"client": "awsdw", "scenarios": ["A01"], "mode": "guided"}).status_code == 200
+    meta = c.get("/api/meta").json()
+    assert meta["client_id"] == "awsdw" and "Warehouse Engineer" in [p["name"] for p in meta["people"]]
+    sig = c.get("/api/signals").json()
+    mine = {t["id"] for t in sig["tools"] if t["in_estate"]}
+    assert {"redshift", "airflow", "glue", "fivetran", "tableau", "aws", "servicenow"} <= mine and "oracle" not in mine and len(sig["tools"]) >= 28
+    run = c.get("/api/run").json()
+    assert run["issues"] and run["issues"][0]["stages"][0]["asks"][0]["to"] == "L1 Operator"
+    for path in ("/api/overview", "/api/batch", "/api/team", "/api/knowledge", "/api/integrations", "/api/reports/health", "/api/reports/handover", "/api/reports/review"):
+        assert c.get(path).status_code == 200, path
+    assert c.post("/api/sim/start", json={"client": "nope", "scenarios": []}).status_code == 403

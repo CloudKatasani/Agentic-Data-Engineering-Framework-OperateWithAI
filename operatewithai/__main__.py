@@ -21,23 +21,33 @@ def main() -> None:
     s.add_argument("--until", default="", help="Run the night to this time before serving (HH:MM); default: stop at the first detection")
     s.add_argument("--fast", action="store_true", help="Agents hand off to each other without a person confirming each step")
     s.add_argument("--autotick", type=float, default=0, help="Advance the simulated clock 5 minutes every N seconds")
+    s.add_argument("--client", default="demo", help="Client estate: demo, lakehouse, awsdw, gcp")
+    b = sub.add_parser("benchmark", help="Inject every scenario of every client estate and grade triage and diagnosis against the injected cause")
     n = sub.add_parser("night", help="Run a night without people and print what the agents did and what waits on whom")
     n.add_argument("--scenarios", default="typical")
     n.add_argument("--until", default="08:00")
+    n.add_argument("--client", default="demo")
     sub.add_parser("scenarios", help="List the scenario library")
     sub.add_parser("operating-model", help="Print the operating model document")
     a = p.parse_args()
 
+    svc = Service(getattr(a, 'client', 'demo')) if a.cmd in ('serve', 'night') else None
+
     def pick(text: str) -> list[str]:
-        return PRESETS[text]["scenarios"] if text in PRESETS else [x.strip() for x in text.split(",") if x.strip()]
+        presets = svc.library()["presets"]
+        return presets[text]["scenarios"] if text in presets else [x.strip() for x in text.split(",") if x.strip()]
 
     if a.cmd == "operating-model":
         print(operating_model(Environment.load()), end="")
     elif a.cmd == "scenarios":
-        for sc in SCENARIOS:
-            print(f"{sc['id']}  {sc['title']}\n     {sc['story']}")
+        for c in Environment.clients():
+            print(f"\n{c['id']}: {c['name']}\n  {c['stack']}")
+            for sc in Service(c["id"]).library()["scenarios"]:
+                print(f"  {sc['id']}  {sc['title']}")
+    elif a.cmd == "benchmark":
+        from .benchmark import run
+        raise SystemExit(0 if run() else 1)
     elif a.cmd == "night":
-        svc = Service()
         svc.restart(pick(a.scenarios))
         svc.run_until(a.until)
         for t in svc.ops.tickets():
@@ -49,12 +59,11 @@ def main() -> None:
             print(f"    {note['escalated_to'] or note['to']}: {note['title']}")
         print("\nBusiness services:")
         for sv in svc.ops.projection["services"].values():
-            print(f"    {sv['name']}: {sv['status']} (estimate {sv['eta'][11:16]}, deadline {sv['deadline'][11:16]})")
+            print(f"    {sv['name']}: {sv['status']} (now {sv['est']}, promised {sv['due']})")
     else:
         import uvicorn
 
         from .api.app import create_app
-        svc = Service()
         svc.restart(pick(a.scenarios), guided=not a.fast)
         if a.until:
             svc.run_until(a.until)

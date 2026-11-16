@@ -17,6 +17,8 @@ ROWS = [
 
 def history(ops) -> list[dict]:
     out = []
+    if ops.env.client.get("id") != "demo":      # the sample history belongs to the first demo client
+        return out
     for days, ke_id, prio, mtta, mttr in ROWS:
         ke = ops.kb.get(ke_id)
         sla = ops.env.sla(prio)
@@ -26,4 +28,4 @@ def history(ops) -> list[dict]:
 
 
 def occurrences(ops, ke_id: str) -> int:
-    return sum(1 for r in ROWS if r[1] == ke_id)
+    return sum(1 for r in ROWS if r[1] == ke_id) if ops.env.client.get("id") == "demo" else 0

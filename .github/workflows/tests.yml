@@ -11,4 +11,5 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: node --check operatewithai/web/app.js
       - run: pytest -q
-      - run: python -m operatewithai night --scenarios everything
+      - run: python -m operatewithai benchmark
+      - run: python -m operatewithai night --client lakehouse --scenarios everything

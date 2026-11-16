@@ -111,11 +111,11 @@ def run(ops, new_events: list[dict]) -> None:
         if ops.guided and not ev.get("confirmed_by"):
             _hold(ops, ev, ke)
             continue
-        roots = [ev["node"]] if ev["node"] else env.nodes_of_ci(ev["ci"])
+        roots = ev.get("nodes") or ([ev["node"]] if ev["node"] else env.nodes_of_ci(ev["ci"]))
         services = _services(ops, roots)
         impact = _impact(env, services)
         urgency = "medium" if services else "low"
-        tower = ke["tower"] if ke else env.tower_of_ci(ev["ci"])
+        tower = ke["tower"] if ke and ke.get("tower") in env.towers else env.tower_of_ci(ev["ci"])
         title = ke["title"] if ke else f"{ev['entity']} failed on {env.cis[ev['ci']]['name']}: error not in the known error database"
         inc = ops.open_ticket("incident", title, env.priority(impact, urgency), tower, NAME, impact=impact, urgency=urgency,
                               ke=ke["id"] if ke else None, events=[ev["id"]], fingerprints=[ev["fingerprint"]], cis=[ev["ci"]],

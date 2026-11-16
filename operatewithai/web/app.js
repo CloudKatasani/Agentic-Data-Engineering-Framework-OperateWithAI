@@ -181,17 +181,17 @@ routes.home = async () => {
   const risk = o.services.filter((s) => ["at risk", "breach predicted", "breached"].includes(s.status)).length;
   const w = o.watch;
   main().innerHTML = `
-    <h1>Command center</h1><div class="sub">${esc(o.client)} · night batch and morning deliverables</div>
+    <h1>Command center</h1><div class="sub">${esc(o.client)} · ${esc(o.stack)}</div>
     <div class="grid g4">
       <div class="card kpi"><div class="v">${open.length}</div><div class="l">Open incidents${open.some((i) => i.priority === "P1") ? " · P1 active" : ""}</div></div>
       <div class="card kpi"><div class="v">${o.asks}</div><div class="l">Decisions waiting on people</div></div>
       <div class="card kpi"><div class="v">${risk}</div><div class="l">Business services at risk</div></div>
       <div class="card kpi"><div class="funnel"><span><b>${w.raw || 0}</b> tool reports</span>→<span><b>${w.events || 0}</b> alerts</span>→<span><b>${o.incidents.length}</b> incidents</span></div><div class="l"><a href="#/data">What the agents read tonight</a></div></div>
     </div>
-    <h2>Business services due this morning</h2>
+    <h2>What the business is promised</h2>
     <div class="grid g4">${o.services.map((s) => `<div class="card svc s-${slug(s.status)}">
-      <div class="nm">${esc(s.name)}</div><div class="muted small">${esc(s.audience)}${s.regulated ? " · regulated" : ""}</div>
-      <div class="big">${hm(s.eta)}</div><div class="small">${s.status.startsWith("delivered") ? "delivered" : "estimate"} · due ${hm(s.deadline)}</div>
+      <div class="nm">${esc(s.name)}</div><div class="muted small">${s.pattern ? esc(s.pattern) + " · " : ""}${esc(s.audience)}${s.regulated ? " · regulated" : ""}</div>
+      <div class="big" style="${s.kind === "freshness" ? "font-size:17px" : ""}">${esc(s.est)}</div><div class="small">${s.kind === "freshness" ? "freshness promise: " + esc(s.due) : (s.status.startsWith("delivered") ? "delivered" : "estimate") + " · due " + esc(s.due)}</div>
       <div style="margin-top:8px">${badge(s.status, SVC_CLS[s.status])} ${s.blocking.map((b) => `<a href="#/ticket/${esc(b)}">${esc(b)}</a>`).join(" ")}</div></div>`).join("")}</div>
     <div class="grid" style="grid-template-columns: 2fr 1fr; margin-top: 18px">
       <div>
@@ -250,7 +250,7 @@ routes.ticket = async (id) => {
       <div class="k">Response SLA</div><div>${t.ack_at ? `${t.sla.respond_met ? badge("met", "b-ok") : badge("missed", "b-bad")} acknowledged ${hm(t.ack_at)} by ${esc(t.assignee)}` : `due ${hm(t.sla.respond_due)}`}</div>
       <div class="k">Resolution SLA</div><div>${t.resolved_at ? `${t.sla.resolve_met ? badge("met", "b-ok") : badge("missed", "b-bad")} resolved ${hm(t.resolved_at)}` : `due ${hm(t.sla.resolve_due)}`}</div>
       <div class="k">Impact / urgency</div><div>${esc(t.impact)} / ${esc(t.urgency)}</div><div class="k">Systems</div><div>${esc((t.cis || []).join(", "))}</div></div>` : "";
-  const chains = (r.chains || []).map((c) => `<div class="small"><b>${esc(c.service.name)}</b> · due ${hm(c.service.deadline)} · estimate ${hm(c.service.eta)} ${badge(c.service.status, SVC_CLS[c.service.status])}</div>
+  const chains = (r.chains || []).map((c) => `<div class="small"><b>${esc(c.service.name)}</b> · promised ${esc(c.service.due)} · now ${esc(c.service.est)} ${badge(c.service.status, SVC_CLS[c.service.status])}</div>
     <div class="chain">${c.nodes.map((n, i) => `${i ? '<span class="arrow">›</span>' : ""}<div class="cn ${n.root ? "root" : n.affected ? "hit" : "ok"}"><div class="k">${esc(n.kind)}${n.root ? " · cause here" : ""}</div>${esc(n.name)}<div class="st ${slug(n.state)}">${esc(n.state)}${n.eta && !["succeeded"].includes(n.state) ? " · est. " + hm(n.eta) : ""}</div></div>`).join("")}</div>`).join("");
   const diag = d ? `<div class="card"><h3 style="margin-top:0">Diagnosis ${badge(d.status, { confirmed: "b-ok", likely: "b-warn", unknown: "b-bad", unconfirmed: "b-bad", recognised: "b-info" }[d.status])} ${t.ke ? `<a href="#/knowledge">${esc(t.ke)}</a>` : ""}</h3>
       <p>${esc(d.cause)}</p>${table(["Check (read-only)", "What it showed", ""], d.evidence.map((e) => `<tr><td>${esc(e.check)}<div class="muted small mono">${esc(e.probe)}</div></td><td>${esc(e.result)}</td><td>${e.confirms === true ? badge("confirms", "b-ok") : e.confirms === false ? badge("does not confirm", "b-bad") : badge("fact")}</td></tr>`))}
@@ -290,9 +290,9 @@ routes.batch = async () => {
   const pos = (iso) => Math.max(0, Math.min(100, ((new Date(iso).getTime() - t0) / span) * 100));
   const bar = (cls, a, z, title) => `<div class="gbar ${cls}" style="left:${pos(a)}%;width:${Math.max(pos(z) - pos(a), 0.6)}%" title="${esc(title)}"></div>`;
   const axis = [1, 2, 3, 4, 5, 6, 7, 8].map((h) => `<span style="left:${pos(`${day}0${h}:00:00`)}%">0${h}:00</span>`).join("");
-  const deadlines = b.services.map((s) => `<div class="gdead" style="left:${pos(s.deadline)}%" title="${esc(s.name)} deadline ${hm(s.deadline)}"></div>`).join("");
+  const deadlines = b.services.filter((s) => s.kind !== "freshness").map((s) => `<div class="gdead" style="left:${pos(s.deadline)}%" title="${esc(s.name)} deadline ${hm(s.deadline)}"></div>`).join("");
   main().innerHTML = `<h1>Batch and SLA</h1><div class="sub">The Batch and SLA Agent re-plans the night every cycle from scheduler state and open incidents · replication lag ${b.lag_minutes} min</div>
-    <div class="card">${table(["Business service", "Deadline", "Estimate", "Slack", "Status", "In the way"], b.services.map((s) => `<tr><td><b>${esc(s.name)}</b><div class="muted small">${esc(s.audience)}${s.regulated ? " · regulated" : ""}</div></td><td class="mono">${hm(s.deadline)}</td><td class="mono">${hm(s.eta)}</td>
+    <div class="card">${table(["Business service", "Promise", "Now", "Slack", "Status", "In the way"], b.services.map((s) => `<tr><td><b>${esc(s.name)}</b><div class="muted small">${s.pattern ? esc(s.pattern) + " · " : ""}${esc(s.audience)}${s.regulated ? " · regulated" : ""}</div></td><td class="mono">${esc(s.due)}</td><td class="mono">${esc(s.est)}</td>
       <td>${s.status.startsWith("delivered") ? "" : s.slack_minutes + " min"}</td><td>${badge(s.status, SVC_CLS[s.status])}</td><td>${s.blocking.map((x) => `<a href="#/ticket/${esc(x)}">${esc(x)}</a>`).join(" ")}</td></tr>`))}</div>
     <div class="card"><h3 style="margin-top:0">Tonight's jobs <span class="muted small">dashed box = plan · solid = actual or projected · blue line = now · red lines = service deadlines</span></h3>
       <div class="grow"><div></div><div class="gaxis">${axis}</div></div>
@@ -332,10 +332,14 @@ routes.data = async () => {
   const d = await api("GET", "/signals");
   const I = tab === "endpoints" ? await api("GET", "/integrations") : null;
   const TYPE = { Log: "b-info", Telemetry: "b-ok", Audit: "b-violet", Metadata: "" };
+  const all = store.get("owai_dall", false);
+  const allTools = d.tools.length;
+  d.tools = d.tools.filter((t) => all || t.in_estate);
+  if (I) I.tools = I.tools.filter((t) => all || t.in_estate);
   const feeds = d.tools.flatMap((t) => t.feeds.map((f) => ({ ...f, tool: t.tool })));
   const count = (ty) => feeds.filter((f) => f.type === ty).length;
   const body = {
-    tools: () => d.tools.map((t) => `<div class="card"><div class="spread"><h3 style="margin:0">${esc(t.tool)}</h3>${t.received ? badge(t.received + (t.received === 1 ? " report" : " reports") + " read tonight", "b-info") : ""}</div>
+    tools: () => d.tools.map((t) => `<div class="card"><div class="spread"><h3 style="margin:0">${esc(t.tool)} ${t.category ? badge(t.category) : ""}</h3>${t.received ? badge(t.received + (t.received === 1 ? " report" : " reports") + " read tonight", "b-info") : ""}</div>
       <div class="muted small" style="margin:2px 0 10px"><b>Access needed:</b> ${esc(t.access)}</div>
       ${table(["Feed", "Type", "What it tells the agents", "Used by", "What that makes possible"], t.feeds.map((f) => `<tr><td><b>${esc(f.name)}</b></td><td>${badge(f.type, TYPE[f.type])}</td><td>${esc(f.gives)}</td><td class="small">${f.agents.map((a) => esc(a)).join("<br>")}</td><td>${esc(f.enables)}</td></tr>`))}</div>`).join(""),
     agents: () => d.agents.map((name) => { const mine = feeds.filter((f) => f.agents.includes(name.replace(/ Agent$/, ""))); return mine.length ? `<div class="card"><h3 style="margin-top:0">${esc(name)} <span class="muted small">${mine.length} feeds from ${new Set(mine.map((f) => f.tool)).size} tools</span></h3>
@@ -353,10 +357,13 @@ routes.data = async () => {
       <td class="small">${esc(e.handling)} ${e.incident ? `<a href="#/ticket/${esc(e.incident)}">${esc(e.incident)}</a>` : ""}</td><td>${badge(e.status, e.status === "cleared" ? "b-ok" : e.status === "suppressed" ? "b-violet" : e.severity === "warning" ? "b-warn" : "b-bad")}</td></tr>`), "No alerts yet tonight.")}`,
   };
   main().innerHTML = `<h1>Data needed from tools</h1><div class="sub">The logs, telemetry, audit data and metadata each tool must provide for the agents to work. All of it is read-only status and metadata: no business data rows leave the client's systems.</div>
-    <div class="grid g4"><div class="card kpi"><div class="v">${d.tools.length}</div><div class="l">Tools connected</div></div><div class="card kpi"><div class="v">${count("Log")}</div><div class="l">Log feeds</div></div>
+    <div class="grid g4"><div class="card kpi"><div class="v">${d.tools.length}</div><div class="l">${all ? "Technologies supported" : "Tools in this client's stack"}</div></div><div class="card kpi"><div class="v">${count("Log")}</div><div class="l">Log feeds</div></div>
       <div class="card kpi"><div class="v">${count("Telemetry")}</div><div class="l">Telemetry feeds</div></div><div class="card kpi"><div class="v">${count("Audit") + count("Metadata")}</div><div class="l">Audit and metadata feeds</div></div></div>
-    <div class="tabs" style="margin-top:16px">${[["tools", "By tool"], ["agents", "By agent"], ["endpoints", "Integration endpoints"], ["tonight", "Read tonight"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
+    <div class="spread" style="margin-top:14px"><div class="small"><b>${esc(d.client)}</b> <span class="muted">· ${esc(d.stack)}</span></div>
+      <label class="chk small"><input type="checkbox" id="dataAll" ${all ? "checked" : ""}> Show all ${allTools} supported technologies</label></div>
+    <div class="tabs" style="margin-top:10px">${[["tools", "By tool"], ["agents", "By agent"], ["endpoints", "Integration endpoints"], ["tonight", "Read tonight"]].map(([id, l]) => `<div class="tab ${tab === id ? "active" : ""}" data-tab="${id}">${l}</div>`).join("")}</div>${body[tab]()}`;
   $$("[data-tab]").forEach((el) => { el.onclick = () => { store.set("owai_dtab", el.dataset.tab); render(); }; });
+  $("#dataAll").onchange = (e) => { store.set("owai_dall", e.target.checked); render(); };
   if (!I) return;
   const find = (id) => I.tools.flatMap((t) => t.inbound).find((e) => e.id === id);
   const sampleText = (e) => (e.format === "text" ? e.sample : JSON.stringify(e.sample, null, 2));
@@ -492,15 +499,21 @@ routes.audit = async () => {
 // ------------------------------------------------------------------ simulator
 routes.simulator = async () => {
   META = await api("GET", "/meta");
-  main().innerHTML = `<h1>Scenario simulator</h1><div class="sub">A simulated night at the demo client. Tools report in their own formats; nothing here is real client data. Pick what goes wrong and start the night. The live run then shows each agent's output in turn and waits for the right person before the next agent takes over.</div>
-    <div class="card"><div class="row">${Object.entries(META.presets).map(([id, p]) => `<button class="btn" data-preset="${id}">${esc(p.title)}</button>`).join("")}<span class="sp"></span>
+  const pick = store.get("owai_client", "") && META.clients.some((c) => c.id === store.get("owai_client", "")) ? store.get("owai_client") : META.client_id;
+  const lib = pick === META.client_id ? { scenarios: META.scenarios, presets: META.presets } : await api("GET", "/sim/library?client=" + pick);
+  const cl = META.clients.find((c) => c.id === pick);
+  main().innerHTML = `<h1>Scenario simulator</h1><div class="sub">A simulated night at one of the demo clients, each on a different technology stack. Tools report in their own formats; nothing here is real client data. Pick what goes wrong and start the night. The live run then shows each agent's output in turn and waits for the right person before the next agent takes over.</div>
+    <div class="card"><label>Client estate</label><select id="simClient">${META.clients.map((c) => `<option value="${c.id}" ${c.id === pick ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+      <div class="muted small" style="margin-top:6px">Stack: ${esc(cl.stack)}${pick !== META.client_id ? " · starting a night switches the whole console to this client" : ""}</div></div>
+    <div class="card"><div class="row">${Object.entries(lib.presets).map(([id, p]) => `<button class="btn" data-preset="${id}">${esc(p.title)}</button>`).join("")}<span class="sp"></span>
       <select id="simMode" style="width:auto"><option value="guided">Step by step: a person confirms every hand-off</option><option value="fast">Fast: agents hand off, people approve plans and fixes</option></select>
       <button class="btn primary" id="simGo">Start a new night</button></div>
-      ${META.scenarios.map((s) => `<label class="scn"><input type="checkbox" value="${s.id}" ${META.running.includes(s.id) ? "checked" : ""}><span><b>${s.id} · ${esc(s.title)}</b> ${s.tools.map((t) => badge(t)).join(" ")}<br><span class="muted">${esc(s.story)}</span></span></label>`).join("")}
+      ${lib.scenarios.map((s) => `<label class="scn"><input type="checkbox" value="${s.id}" ${pick === META.client_id && META.running.includes(s.id) ? "checked" : ""}><span><b>${s.id} · ${esc(s.title)}</b> ${s.tools.map((t) => badge(t)).join(" ")}<br><span class="muted">${esc(s.story)}</span></span></label>`).join("")}
       <p class="muted small">Known errors the team has added stay in place across nights, so running S08 twice shows the second occurrence being recognised.</p></div>`;
-  $$("[data-preset]").forEach((b) => { b.onclick = () => $$(".scn input").forEach((c) => { c.checked = META.presets[b.dataset.preset].scenarios.includes(c.value); }); });
+  $$("[data-preset]").forEach((b) => { b.onclick = () => $$(".scn input").forEach((c) => { c.checked = lib.presets[b.dataset.preset].scenarios.includes(c.value); }); });
+  $("#simClient").onchange = (e) => { store.set("owai_client", e.target.value); render(); };
   $("#simGo").onclick = async () => {
-    await guard(() => api("POST", "/sim/start", { scenarios: $$(".scn input:checked").map((c) => c.value), mode: $("#simMode").value }), "Night started");
+    await guard(() => api("POST", "/sim/start", { scenarios: $$(".scn input:checked").map((c) => c.value), mode: $("#simMode").value, client: pick }), "Night started");
     META = await api("GET", "/meta"); location.hash = "#/run";
   };
 };
@@ -527,7 +540,7 @@ routes.run = async () => {
     : r.over ? `<div class="nextbar ok"><div><b>The night is over.</b><div class="small">${r.services.map((x) => `${esc(x.name)}: ${esc(x.status)}`).join(" · ")}</div></div><a class="btn" href="#/simulator">Start another night</a></div>`
       : `<div class="nextbar"><div><b>${r.issues.length ? "The agents are working; nothing is waiting on a person." : "Quiet so far: the Watch Desk Agent has found nothing to report."}</b><div class="small">Move the clock to the next thing that happens.</div></div><button class="btn primary" id="runNext">Continue to the next event</button></div>`;
   main().innerHTML = `<div class="spread"><div><h1>Live run</h1><div class="sub">${r.guided ? "Step by step: a person confirms every hand-off from one agent to the next" : "Fast mode: agents hand off to each other; people approve plans, fixes and messages"} · ${r.watch.raw || 0} tool reports read so far</div></div>
-      <div class="row">${r.services.map((x) => `<span title="${esc(x.name)} · due ${hm(x.deadline)} · estimate ${hm(x.eta)}">${badge(x.name.split(" (")[0] + ": " + x.status, SVC_CLS[x.status])}</span>`).join(" ")}</div></div>
+      <div class="row">${r.services.map((x) => `<span title="${esc(x.name)} · promised ${esc(x.due)} · now ${esc(x.est)}">${badge(x.name.split(" (")[0] + ": " + x.status, SVC_CLS[x.status])}</span>`).join(" ")}</div></div>
     ${r.scenarios.length ? `<details style="margin-bottom:12px"><summary class="small muted">What goes wrong tonight (${r.scenarios.map((x) => x.id).join(", ")})</summary>${r.scenarios.map((x) => `<p class="small"><b>${esc(x.title)}.</b> ${esc(x.story)}</p>`).join("")}</details>` : ""}
     ${next}
     ${r.prevented.length ? `<div class="nextbar ok"><div><b>Prevented: the Oracle service account never expired.</b><div class="small">The Service Request Agent raised the rotation 9 days early and the Security Lead approved it, so the GoldenGate and Informatica failures of scenario S03 did not happen.</div></div></div>` : ""}

@@ -5,7 +5,7 @@ a service account that is about to expire."""
 
 from __future__ import annotations
 
-from .resolution import RERUN
+from .resolution import rerun_action
 
 NAME = "Service Request Agent"
 
@@ -42,7 +42,7 @@ def _fulfil(ops, t: dict) -> None:
                 ops.note(t, NAME, f"On hold: the data it reads is not ready ({', '.join(waiting)})."
                          + (f" Linked to {', '.join(blockers)}; it will run when that is resolved." if blockers else ""))
             return
-        res = ops.estate.apply(RERUN[node.split(".")[0]], node=node)
+        res = ops.estate.apply(rerun_action(ops, node), node=node)
         return _close(ops, t, "Fulfilled", res["message"])
     args = {"user": f.get("user"), "role": f.get("role")} if cat["action"] == "snowflake.grant_role" else {"account": f.get("account")}
     res = ops.estate.apply(cat["action"], **args)

@@ -14,7 +14,9 @@ from typing import Optional
 from .agents import batch_sla, comms, diagnosis, knowledge, requests, resolution, triage, watch
 from .engine.ops import Ops, Refused
 from .env import Environment, hhmm
-from .sim.scenarios import BY_ID, PRESETS, inject
+from .knowledge import KB
+from .sim import generic
+from .sim.scenarios import BY_ID, PRESETS, SCENARIOS, inject
 from .sim.world import TICK, World
 from .store import Store
 
@@ -36,9 +38,16 @@ class Service:
         with self.lock:
             self.runs += 1
             self.env = Environment.load(self.client)
-            self.world = World(self.env)
-            self.scenarios = [s for s in scenarios if s in BY_ID]
-            inject(self.world, self.scenarios)
+            lib = self.library()
+            by_id = {s["id"]: s for s in lib["scenarios"]}
+            self.scenarios = [s for s in scenarios if s in by_id]
+            if self.env.client.get("sim") == "generic":
+                self.world = generic.GenericWorld(self.env, KB())
+                for sid in self.scenarios:
+                    self.world.schedule_scenario(by_id[sid])
+            else:
+                self.world = World(self.env)
+                inject(self.world, self.scenarios)
             self.store = Store(f"{self.data}/night-{self.runs}.db" if self.data else ":memory:")
             for ke in learned or []:
                 self.store.put("ke", ke)
@@ -47,9 +56,21 @@ class Service:
             batch_sla.run(self.ops)
             self.ops.audit("Service", "Night started", "", f"Scenarios: {', '.join(self.scenarios) or 'none'}")
 
-    def restart(self, scenarios: list[str], guided: bool = False) -> None:
+    def library(self, client: Optional[str] = None) -> dict:
+        """The scenario library of a client estate."""
+        client = client or self.client
+        if Environment.load(client).client.get("sim") == "generic":
+            lib = generic.library(client)
+            return {"scenarios": lib["scenarios"], "presets": lib.get("presets", {})}
+        return {"scenarios": SCENARIOS, "presets": PRESETS}
+
+    def restart(self, scenarios: list[str], guided: bool = False, client: Optional[str] = None) -> None:
         """Start a new night. Known errors the team has learned are kept. ``guided`` is the
         step-by-step mode: a person confirms every hand-off from one agent to the next."""
+        if client and client != self.client:
+            if client not in {c["id"] for c in Environment.clients()}:
+                raise Refused(f"There is no client estate called {client}.")
+            self.client = client
         self.reset(scenarios, learned=self.store.all("ke"), guided=guided)
 
     def _signature(self) -> tuple:
@@ -131,8 +152,8 @@ class Service:
     def ingest(self, source: str, payload) -> dict:
         """Data pushed to an integration endpoint, in the tool's own format. It goes through
         the same path as collected data: Watch Desk, then triage and the rest."""
-        from .connectors.parsers import PARSERS
-        if source not in PARSERS:
+        from .connectors.parsers import known_source
+        if not known_source(self.ops.kb, source):
             raise KeyError(source)
         with self.lock:
             ops = self.ops

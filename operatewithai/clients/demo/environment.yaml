@@ -6,6 +6,7 @@
 client:
   id: demo
   name: "Aldermoor Insurance (synthetic demo client)"
+  stack: "Oracle and Db2 sources, GoldenGate, Informatica, Snowflake, dbt, Denodo, Power BI, Cognos on AWS and Azure"
   itsm: ServiceNow
   batch_day_start: "00:30"
 

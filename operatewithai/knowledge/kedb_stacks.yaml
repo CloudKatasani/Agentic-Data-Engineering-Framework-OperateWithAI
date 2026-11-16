@@ -1,0 +1,208 @@
+# Known errors for cloud data stacks: Databricks, Redshift, BigQuery, Airflow, ADF, Glue, Kafka,
+# Fivetran, streaming and data quality. Same format as kedb.yaml. The owning tower is the tower
+# of the system that raised the alert, so these entries work for any client model.
+
+known_errors:
+  - id: KE0301
+    title: "Databricks job fails on a Delta schema mismatch"
+    tool: Databricks
+    signatures: ["DELTA_SCHEMA_MISMATCH"]
+    typical_fix_minutes: 30
+    cause: "The source gained a column and the job writes to a Delta table without schema evolution, so Delta rejects the write."
+    checks:
+      - {probe: databricks.run_output, args: {}, expect: {schema_mismatch: true}, says: "The failed task reports a schema mismatch and names the extra column"}
+      - {probe: delta.table_history, args: {}, expect: {new_source_column: true}, says: "Table history shows the upstream table gained the column recently"}
+    plan:
+      - {kind: action, action: databricks.enable_schema_evolution, args: {node: "{node}"}, title: "Allow additive schema evolution (mergeSchema) for this table"}
+      - {kind: action, action: databricks.repair_run, args: {node: "{node}"}, title: "Repair the run: rerun only the failed task"}
+      - {kind: verify, probe: batch.job_state, args: {node: "{node}"}, expect: {succeeded: true}, timeout: 90, title: "The job completes"}
+    permanent_fix: "Agree a schema contract with the source team; alert on schema changes in bronze before the silver job runs."
+
+  - id: KE0302
+    title: "Databricks clusters cannot start: cloud quota reached"
+    tool: Databricks
+    signatures: ["DBX_CLOUD_LAUNCH_FAILURE"]
+    typical_fix_minutes: 25
+    cause: "The cloud subscription has no cores left in the VM family the job clusters use, so new clusters cannot launch."
+    checks:
+      - {probe: databricks.cluster_events, args: {}, expect: {quota_exceeded: true}, says: "Cluster events show launch failures with a quota error"}
+    plan:
+      - {kind: action, action: databricks.switch_instance_pool, args: {pool: fallback-pool}, title: "Point the job clusters at the fallback instance pool (another VM family)"}
+      - {kind: action, action: databricks.repair_run, args: {node: "{node}"}, title: "Repair the first failed run"}
+    permanent_fix: "Raise the core quota with the cloud provider and run nightly jobs from a pre-warmed instance pool."
+
+  - id: KE0303
+    title: "Kafka Connect task failed: the stream has stopped landing"
+    tool: Kafka
+    signatures: ["KAFKA_CONNECT_TASK_FAILED"]
+    typical_fix_minutes: 20
+    cause: "A connector task hit an error it does not retry. The connector still shows RUNNING while nothing is delivered."
+    checks:
+      - {probe: kafka.connect_status, args: {}, expect: {task_failed: true}, says: "Connect REST shows the task FAILED with its stack trace"}
+    plan:
+      - {kind: action, action: kafka.restart_connector_task, args: {connector: sink-orders-adls, task: 0}, title: "Restart the failed connector task (resumes from committed offsets)"}
+      - {kind: verify, probe: stream.lag, args: {node: "{node}"}, expect: {within_limit: true}, timeout: 60, title: "Consumer lag is back under the limit"}
+    permanent_fix: "Set errors.retry.timeout and a dead letter queue on the connector; alert on task state, not only connector state."
+
+  - id: KE0304
+    title: "Stream is behind its freshness limit"
+    tool: Streaming
+    symptom: true
+    signatures: ["KAFKA_CONSUMER_LAG", "STREAM_BACKLOG"]
+    typical_fix_minutes: 30
+    cause: "The consumer is not keeping up: a stopped consumer or connector, a slow sink, or a burst of traffic."
+    plan:
+      - {kind: manual, title: "Find out why the consumer is behind", guidance: "Check the consumer or connector state first, then the sink's write latency, then partition skew."}
+    permanent_fix: ""
+
+  - id: KE0305
+    title: "ADF copy fails: self-hosted integration runtime offline"
+    tool: Azure Data Factory
+    signatures: ["ADF_IR_OFFLINE", "HOST_ALARM:ir-onprem-01"]
+    typical_fix_minutes: 25
+    cause: "The machine that hosts the self-hosted integration runtime is stopped, so the factory cannot reach on-premises sources."
+    checks:
+      - {probe: adf.ir_status, args: {}, expect: {offline: true}, says: "The integration runtime reports no online node"}
+      - {probe: azure.vm_status, args: {host: ir-onprem-01}, expect: {vm_stopped: true}, says: "The VM is stopped"}
+    plan:
+      - {kind: action, action: azure.restart_vm, args: {host: ir-onprem-01}, title: "Start the integration runtime VM"}
+      - {kind: verify, probe: adf.ir_status, args: {}, expect: {online: true}, timeout: 20, title: "The integration runtime is online"}
+    permanent_fix: "Add a second IR node for high availability; exclude IR hosts from shutdown policies."
+
+  - id: KE0306
+    title: "Data arrived but the volume is far outside its normal range"
+    tool: Data quality
+    signatures: ["DQ_VOLUME"]
+    typical_fix_minutes: 60
+    cause: "An upstream load brought only part of the data (wrong incremental window, partial file, filtered source), so every job succeeded on incomplete data."
+    checks:
+      - {probe: dq.volume_history, args: {}, expect: {below_range: true}, says: "Today's row count is far below the recent range"}
+      - {probe: adf.copy_rows, args: {}, expect: {rows_low: true}, says: "The ingest step itself copied far fewer rows than usual"}
+    plan:
+      - {kind: action, action: adf.rerun_pipeline_full_window, args: {node: adf.pl_erp_ingest}, title: "Reload the full business date from the source and rebuild the affected tables"}
+      - {kind: verify, probe: dq.volume_history, args: {}, expect: {below_range: false}, timeout: 180, title: "The volume check passes"}
+    permanent_fix: "Add a row-count reconciliation between source and bronze so a partial load stops at ingestion."
+
+  - id: KE0307
+    title: "Data quality check failed: stale, changed schema or failing test"
+    tool: Data quality
+    signatures: ["DQ_FRESHNESS", "DQ_SCHEMA", "DQ_TEST"]
+    typical_fix_minutes: 60
+    cause: "The table is stale, its columns changed, or a business rule test failed. The data is held back from consumers until someone decides."
+    plan:
+      - {kind: manual, title: "Find the upstream load or change behind the failed check; agree with the data owner whether to publish, hold or reload", guidance: "Freshness: check the load that feeds the table. Schema: compare with yesterday's columns and the change calendar. Test: read the failing rows' keys only."}
+    permanent_fix: ""
+
+  - id: KE0310
+    title: "Redshift cluster is out of disk"
+    tool: Amazon Redshift
+    signatures: ["REDSHIFT_DISK_FULL"]
+    typical_fix_minutes: 30
+    cause: "A query is spilling intermediate results to disk until the cluster is full. Every write then fails with Disk Full."
+    checks:
+      - {probe: redshift.disk_usage, args: {}, expect: {disk_full: true}, says: "Disk usage is at the limit and rose sharply"}
+      - {probe: redshift.top_queries, args: {}, expect: {runaway_query: true}, says: "One running query holds a large share of temporary blocks"}
+    plan:
+      - {kind: action, action: redshift.cancel_query, args: {query: "4409981"}, title: "Cancel the runaway query"}
+      - {kind: verify, probe: redshift.disk_usage, args: {}, expect: {disk_full: false}, timeout: 20, title: "Disk usage is back to normal"}
+    permanent_fix: "Query monitoring rule to abort queries over a temp-space threshold; separate WLM queue with limits for ad-hoc users."
+
+  - id: KE0311
+    title: "Ingestion connector cannot authenticate to the source"
+    tool: Fivetran
+    signatures: ["FIVETRAN_AUTH_FAILED"]
+    typical_fix_minutes: 40
+    cause: "The credential or token the connector uses was revoked or expired at the source."
+    checks:
+      - {probe: fivetran.connector_status, args: {}, expect: {auth_failed: true}, says: "The connector's credential test fails; the source shows the token revoked"}
+    plan:
+      - {kind: action, action: fivetran.reauthorize, args: {connector: "{node}"}, title: "Re-authorise the connector with the integration user (from the vault)"}
+    permanent_fix: "Exempt integration users from token clean-ups; alert on connector credential tests daily."
+
+  - id: KE0312
+    title: "Glue job killed for exceeding memory"
+    tool: AWS Glue
+    signatures: ["GLUE_OOM"]
+    typical_fix_minutes: 35
+    cause: "The input is much larger than usual and the job's workers do not have the memory for it."
+    checks:
+      - {probe: glue.job_metrics, args: {}, expect: {memory_exhausted: true}, says: "Executor memory was at its limit and the input is several times its normal size"}
+    plan:
+      - {kind: action, action: glue.start_job_run_scaled, args: {node: "{node}", workers: 15, worker_type: G.2X}, title: "Run the job again with larger workers for tonight (15 x G.2X)"}
+      - {kind: verify, probe: batch.job_state, args: {node: "{node}"}, expect: {succeeded: true}, timeout: 90, title: "The job completes"}
+    permanent_fix: "Turn on Glue auto scaling and partition the input; size workers from the file size at start."
+
+  - id: KE0320
+    title: "BigQuery custom quota exceeded"
+    tool: Google BigQuery
+    signatures: ["BQ_QUOTA_EXCEEDED"]
+    typical_fix_minutes: 30
+    cause: "The project's daily query quota was used up, usually by a backfill or an unbounded query earlier in the day."
+    checks:
+      - {probe: bigquery.quota_usage, args: {}, expect: {quota_exceeded: true}, says: "The custom quota is at 100% and one job accounts for most of it"}
+    plan:
+      - {kind: action, action: bigquery.raise_custom_quota, args: {quota: QueryUsagePerDay, add_tib: 5}, title: "Raise the daily query quota by 5 TiB for today"}
+    permanent_fix: "Run backfills in a separate project or reservation; set per-user quotas so one job cannot use the day's allowance."
+
+  - id: KE0321
+    title: "Dataflow streaming job failed or stuck"
+    tool: Google Cloud Dataflow
+    signatures: ["DATAFLOW_JOB_JOB_STATE_FAILED", "DATAFLOW_JOB_JOB_STATE_STALLED"]
+    typical_fix_minutes: 25
+    cause: "The streaming job lost its workers or stopped making progress; messages pile up in the subscription."
+    checks:
+      - {probe: dataflow.job_status, args: {}, expect: {job_failed: true}, says: "The job is not running and shows why"}
+    plan:
+      - {kind: action, action: dataflow.restart_job, args: {job: df-visits-stream}, title: "Relaunch the streaming job from its last snapshot"}
+      - {kind: verify, probe: stream.lag, args: {node: "{node}"}, expect: {within_limit: true}, timeout: 60, title: "The backlog is cleared"}
+    permanent_fix: "Run the job across zones; alert on system lag and data freshness, not only on job state."
+
+  # ---- reference entries
+  - id: KE0330
+    title: "Delta concurrent write conflict (ConcurrentAppendException)"
+    tool: Databricks
+    signatures: ["DELTA_CONCURRENT_APPEND"]
+    cause: "Two jobs wrote to the same table partition at once and Delta's optimistic concurrency rejected one."
+    plan:
+      - {kind: manual, title: "Repair the failed run once the other writer has finished; check why two writers overlapped", guidance: "DESCRIBE HISTORY shows both writers. Make the merge condition include the partition column."}
+    permanent_fix: "Serialise writers to the table or partition the merge predicate."
+  - id: KE0331
+    title: "Spark driver or executor out of memory"
+    tool: Databricks
+    signatures: ["DBX_DRIVER_OOM"]
+    cause: "The job collected or shuffled more data than the node's memory, often after a volume jump or a skewed join."
+    plan:
+      - {kind: manual, title: "Read the Spark UI for the failing stage; rerun on a larger node only with the SDM's cost approval", guidance: "Look for collect(), broadcast of a large table and skewed keys before adding memory."}
+    permanent_fix: "Fix the skew or the collect; enable adaptive query execution."
+  - id: KE0332
+    title: "Airflow sensor timed out waiting for an upstream"
+    tool: Apache Airflow
+    signatures: ["AIRFLOW_SENSOR_TIMEOUT"]
+    cause: "The file, partition or upstream job the sensor waits for did not appear in time."
+    plan:
+      - {kind: manual, title: "Find out why the upstream is late, then clear the sensor task", guidance: "The sensor's target is in its log. Clearing the task before the upstream exists only fails again."}
+    permanent_fix: "Alert on the upstream's own deadline rather than on the sensor timeout."
+  - id: KE0333
+    title: "Cloud storage or service access denied (403)"
+    tool: AWS / Azure / GCP
+    signatures: ["AWS_ACCESS_DENIED", "BQ_ACCESS_DENIED"]
+    cause: "The job's role lost a permission: a policy change, a rotated key, or a new bucket or dataset without grants."
+    plan:
+      - {kind: manual, title: "Identify the denied action and resource; restore the permission under the security lead's approval", guidance: "CloudTrail / Activity log / Cloud Audit Logs show the denied call and any policy change before it."}
+    permanent_fix: "Manage data platform roles as code; test permissions in the release pipeline."
+  - id: KE0334
+    title: "Host or service alarm from cloud monitoring"
+    tool: AWS / Azure / GCP
+    signatures: ["HOST_ALARM"]
+    cause: "The cloud provider's monitoring reports the host or service unhealthy."
+    plan:
+      - {kind: manual, title: "Check the resource's state and recent operations; restart only if it is on the restartable list", guidance: "Activity log / CloudTrail / Audit Logs for the last operation on the resource."}
+    permanent_fix: ""
+  - id: KE0335
+    title: "BigQuery query exceeded resources"
+    tool: Google BigQuery
+    signatures: ["BQ_RESOURCES_EXCEEDED"]
+    cause: "The query needs more memory than a slot can give: a very large sort, a skewed join or an exploding array."
+    plan:
+      - {kind: manual, title: "Read the query plan for the heavy stage and fix the model", guidance: "Look for ORDER BY without LIMIT, joins on skewed keys, ARRAY_AGG over large groups."}
+    permanent_fix: "Rewrite the model; do not solve it with more slots."

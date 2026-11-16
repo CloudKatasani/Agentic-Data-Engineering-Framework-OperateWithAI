@@ -33,7 +33,7 @@ def build(ops) -> dict:
         evs = [ops.store.need("event", e) for e in inc["events"]]
         d, plan = inc["diagnosis"], inc["plan"]
         first = evs[0]
-        svc = [f"{env.services[s]['name']} (due {env.services[s]['deadline']})" for s in inc["services"]]
+        svc = [f"{env.services[s]['name']} ({env.service_due(s)})" for s in inc["services"]]
         stages = [_stage("detect", "Detect", "Watch Desk Agent", "Reads every tool, merges repeats and shows what is new", _event_lines(evs),
                          f"Confirmed by the {first['confirmed_by']}" if first.get("confirmed_by") else "No confirmation step in fast mode", "done")]
         stages.append(_stage("triage", "Triage", "Triage Agent", "One ticket per cause, business impact, priority, routing", [

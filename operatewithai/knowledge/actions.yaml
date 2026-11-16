@@ -34,9 +34,47 @@ actions:
      how: "Cognos Administration: stop/start BatchReportService", why: "Interrupts reports that are running for other users"}
   - {id: snowflake.grant_role,            tool: Snowflake,   class: approval, approver_role: data_owner, title: "Grant a Snowflake role to a user",
      how: "GRANT ROLE ... TO USER", why: "Access to data; the owner of the data decides"}
+  # ---- cloud data stacks
+  - {id: databricks.repair_run,            tool: Databricks,  class: standard, title: "Repair a job run (rerun only failed tasks)",
+     how: "Jobs API: POST /jobs/runs/repair", why: "Successful tasks are not repeated"}
+  - {id: databricks.switch_instance_pool,  tool: Databricks,  class: standard, title: "Point job clusters at the agreed fallback instance pool",
+     how: "Jobs API: update job cluster instance_pool_id", why: "Pre-agreed fallback; same size, another VM family"}
+  - {id: databricks.enable_schema_evolution, tool: Databricks, class: approval, approver_role: change_manager, title: "Allow additive schema evolution on a Delta table",
+     how: "Job parameter mergeSchema=true for the table (additive columns only)", why: "Emergency change to a production table's schema"}
+  - {id: airflow.clear_task,               tool: Airflow,     class: standard, title: "Clear failed tasks of a DAG run so they run again",
+     how: "REST API: POST /dags/{id}/clearTaskInstances (only_failed)", why: "Same as a manual clear in the UI"}
+  - {id: adf.rerun_pipeline,               tool: Azure Data Factory, class: standard, title: "Rerun a pipeline from the failed activity",
+     how: "createRun with referencePipelineRunId, startFromFailure", why: "Completed activities are not repeated"}
+  - {id: adf.rerun_pipeline_full_window,   tool: Azure Data Factory, class: approval, approver_role: data_owner, reruns: true, title: "Reload a full business date and rebuild the affected tables",
+     how: "createRun with the window parameters for the business date", why: "Replaces business data; the data owner decides"}
+  - {id: glue.start_job_run,               tool: AWS Glue,    class: standard, title: "Start a Glue job run again",
+     how: "glue:StartJobRun with the same arguments (job bookmarks keep position)", why: "Same as the scheduled run"}
+  - {id: glue.start_job_run_scaled,        tool: AWS Glue,    class: approval, approver_role: sdm, reruns: true, title: "Run a Glue job with more or larger workers for one run",
+     how: "glue:StartJobRun with WorkerType and NumberOfWorkers overrides", why: "Costs more DPU hours"}
+  - {id: kafka.restart_connector_task,     tool: Kafka,       class: standard, title: "Restart a failed Kafka Connect task",
+     how: "Connect REST: POST /connectors/{name}/tasks/{id}/restart", why: "Resumes from committed offsets; no data is skipped"}
+  - {id: fivetran.resync,                  tool: Fivetran,    class: standard, title: "Trigger a connector sync",
+     how: "Fivetran API: POST /connectors/{id}/sync", why: "Incremental; same as the scheduled sync"}
+  - {id: fivetran.reauthorize,             tool: Fivetran,    class: approval, approver_role: security_lead, title: "Re-authorise a connector with the integration user",
+     how: "Connect card with the credential from the vault", why: "Credential action"}
+  - {id: redshift.cancel_query,            tool: Redshift,    class: approval, approver_role: dba_lead, title: "Cancel a named running query",
+     how: "CANCEL <pid> for the query id shown in the evidence", why: "Stops another user's work; the DBA lead decides"}
+  - {id: bigquery.raise_custom_quota,      tool: BigQuery,    class: approval, approver_role: sdm, title: "Raise a custom query quota for the day",
+     how: "Service Usage API: consumer quota override", why: "Spends client money"}
+  - {id: dataflow.restart_job,             tool: Dataflow,    class: standard, title: "Relaunch a streaming job from its last snapshot",
+     how: "Dataflow API: create job from snapshot / update", why: "No messages are lost; Pub/Sub keeps the backlog"}
+  - {id: tableau.refresh_extract,          tool: Tableau,     class: standard, title: "Run an extract refresh now",
+     how: "REST API: POST /datasources/{id}/refresh", why: "Same as the scheduled refresh"}
+  - {id: looker.rebuild_pdt,               tool: Looker,      class: standard, title: "Rebuild a PDT or re-run a schedule",
+     how: "API: start_pdt_build / scheduled_plan_run_once", why: "Same as the scheduled run"}
+  - {id: reverse_etl.trigger_sync,         tool: Reverse ETL, class: standard, title: "Trigger a sync to the business application",
+     how: "API: POST /syncs/{id}/trigger", why: "Incremental; same as the scheduled sync"}
 
 never:
   - {title: "Skip or discard a GoldenGate transaction, or run HANDLECOLLISIONS", why: "Silently loses or duplicates business data"}
+  - {title: "Reset Kafka consumer offsets or skip messages", why: "Silently loses or replays business events"}
+  - {title: "VACUUM or overwrite a Delta table, or drop partitions", why: "Removes history and time travel; not reversible"}
+  - {title: "Resize a cluster or warehouse permanently", why: "A standing cost decision for the client, not an operations fix"}
   - {title: "Kill database sessions or force Db2 applications", why: "Can roll back business transactions; DBA decision under the client's process"}
   - {title: "Drop, truncate or delete data outside a named reload action", why: "Not reversible"}
   - {title: "Change production code: mappings, dbt models, report definitions", why: "Goes through the client's release process, not operations"}

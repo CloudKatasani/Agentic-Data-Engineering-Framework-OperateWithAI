@@ -12,7 +12,7 @@ def run(ops, pushed: list | None = None) -> tuple[list[dict], list[dict]]:
     """Read the tools. ``pushed`` is data that arrived on the integration endpoints; without it
     the agent collects from the estate itself."""
     raw = pushed if pushed is not None else ops.estate.telemetry()
-    alerts = parse(ops.env, raw)
+    alerts = parse(ops.env, raw, ops.kb)
     new, cleared = ops.ingest(alerts)
     stats = ops.store.kv("watch_stats") or {"raw": 0, "alerts": 0, "events": 0, "suppressed": 0}
     stats["raw"] += len(raw)
@@ -29,6 +29,12 @@ def run(ops, pushed: list | None = None) -> tuple[list[dict], list[dict]]:
             ops.store.put("event", ev)
             stats["suppressed"] += 1
             ops.audit(NAME, f"Suppressed alert during {change['id']}", ev["id"], ev["message"])
+    for ev in ops.store.all("event"):
+        if ev["status"] == "suppressed" and ev["handling"].startswith("Expected") and not (ops.env.change_for(ev["ci"], ops.now) or {}).get("active"):
+            ev.update(status="open", handling="Still failing after the change window closed")
+            ops.store.put("event", ev)
+            new.append(ev)
+            ops.audit(NAME, "Change window closed and the alert is still open: sent to triage", ev["id"], ev["message"])
     ops.store.kv("watch_stats", stats)
     for ev in cleared:
         if ev.get("incident"):

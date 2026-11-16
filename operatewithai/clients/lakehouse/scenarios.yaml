@@ -1,0 +1,96 @@
+# What can go wrong at this client. "evidence" is what the read-only checks show while the fault is active.
+probes:
+  databricks.run_output:   {summary: "Last run of the job finished without errors", facts: {schema_mismatch: false, launch_failure: false}}
+  delta.table_history:     {summary: "No schema change on the target table in the last 7 days", facts: {new_source_column: false}}
+  databricks.cluster_events: {summary: "Job clusters started normally", facts: {quota_exceeded: false}}
+  kafka.connect_status:    {summary: "sink-orders-adls: connector RUNNING, 1 of 1 tasks RUNNING", facts: {task_failed: false}}
+  adf.ir_status:           {summary: "Integration runtime ir-onprem-01: Online, 1 of 1 nodes", facts: {offline: false, online: true}}
+  azure.vm_status:         {summary: "Azure VM ir-onprem-01: running", facts: {vm_stopped: false, vm_running: true}}
+  dq.volume_history:       {summary: "gold.sales_mart row count is inside its expected range", facts: {below_range: false}}
+  adf.copy_rows:           {summary: "pl_erp_ingest copied 412,300 rows (7-day average 409,800)", facts: {rows_low: false}}
+
+scenarios:
+  - id: L01
+    title: "Databricks job fails on a Delta schema mismatch after an ERP upgrade"
+    story: "Last night's ERP upgrade (CHG0041120) added a column. ADF lands it in bronze, and job_silver_sales fails writing to silver: Delta refuses the extra column."
+    tools: [Azure Data Factory, Databricks, Power BI]
+    expect_ke: KE0301
+    faults:
+      - type: job_error
+        at: "01:55"
+        node: dbx.job_silver_sales
+        after: 5
+        fixed_by: databricks.enable_schema_evolution
+        message: "Task silver_sales failed: org.apache.spark.sql.AnalysisException: A schema mismatch detected when writing to the Delta table (Table ID: 7c1e2f). To enable schema migration using DataFrameWriter or DataStreamWriter, please set: '.option(\"mergeSchema\", \"true\")'. Data schema has an extra column: loyalty_tier"
+        evidence:
+          databricks.run_output: {summary: "silver_sales task: AnalysisException, schema mismatch on silver.sales; extra column loyalty_tier", facts: {schema_mismatch: true}}
+          delta.table_history: {summary: "bronze.erp_sales gained column loyalty_tier at 01:22 (written by ADF pl_erp_ingest); silver.sales schema unchanged", facts: {new_source_column: true}}
+  - id: L02
+    title: "Databricks clusters cannot start: Azure core quota reached"
+    story: "From 02:50 new job clusters fail to launch because the subscription's vCPU quota for the VM family is used up. The gold, feature and scoring jobs cannot start."
+    tools: [Azure, Databricks, Power BI, ML scoring, Reverse ETL]
+    expect_ke: KE0302
+    faults:
+      - type: job_error
+        at: "02:50"
+        nodes: [dbx.job_gold_sales, dbx.job_features, dbx.job_churn_scoring]
+        fixed_by: databricks.switch_instance_pool
+        message: "Cluster launch failed: CLOUD_PROVIDER_LAUNCH_FAILURE. Azure error: QuotaExceeded. Operation could not be completed as it results in exceeding approved standardDSv5Family Cores quota. Current limit: 200, current usage: 196, additional required: 32."
+        evidence:
+          databricks.cluster_events: {summary: "3 cluster starts failed since 02:50 with CLOUD_PROVIDER_LAUNCH_FAILURE / QuotaExceeded (standardDSv5Family: 196 of 200 cores used)", facts: {quota_exceeded: true}}
+  - id: L03
+    title: "Kafka Connect sink task fails and the order stream falls behind"
+    story: "At 03:20 the sink connector task that lands orders in the lakehouse fails. Consumer lag grows and the order status API serves stale data: a freshness promise, not a morning deadline."
+    tools: [Kafka, Databricks, Data API]
+    expect_ke: KE0303
+    faults:
+      - type: stall
+        at: "03:20"
+        node: kafka.orders
+        fixed_by: kafka.restart_connector_task
+        alert:
+          source: kafka_connect
+          payload: {name: sink-orders-adls, connector: {state: RUNNING}, tasks: [{id: 0, state: FAILED, trace: "org.apache.kafka.connect.errors.ConnectException: Exiting WorkerSinkTask due to unrecoverable exception. Caused by: java.io.IOException: AzureBlobStorage 503 ServerBusy"}]}
+          clear: {name: sink-orders-adls, connector: {state: RUNNING}, tasks: [{id: 0, state: RUNNING}]}
+        evidence:
+          kafka.connect_status: {summary: "sink-orders-adls: connector RUNNING, task 0 FAILED since 03:20 (storage 503 ServerBusy, retries exhausted)", facts: {task_failed: true}}
+  - id: L04
+    title: "ADF self-hosted integration runtime goes offline"
+    story: "At 00:50 the VM that hosts the self-hosted integration runtime stops. The 01:00 ERP ingest cannot reach the on-premises source, so nothing downstream has data."
+    tools: [Azure, Azure Data Factory, Databricks, Power BI]
+    expect_ke: KE0305
+    faults:
+      - type: job_error
+        at: "00:50"
+        node: adf.pl_erp_ingest
+        fixed_by: azure.restart_vm
+        message: "ErrorCode=2200, Failure type: User configuration issue. The Self-hosted Integration Runtime 'ir-onprem-01' is offline. Check the Integration Runtime node status."
+        alert:
+          source: azure
+          payload: {schemaId: azureMonitorCommonAlertSchema, data: {essentials: {alertRule: "VM availability", severity: Sev1, monitorCondition: Fired, configurationItems: [ir-onprem-01], description: "VM ir-onprem-01 is unavailable"}}}
+          clear: {schemaId: azureMonitorCommonAlertSchema, data: {essentials: {alertRule: "VM availability", severity: Sev1, monitorCondition: Resolved, configurationItems: [ir-onprem-01], description: "VM ir-onprem-01 is available"}}}
+        evidence:
+          adf.ir_status: {summary: "Integration runtime ir-onprem-01: Offline, 0 of 1 nodes, last heartbeat 00:49", facts: {offline: true, online: false}}
+          azure.vm_status: {summary: "Azure VM ir-onprem-01: stopped (deallocated by a scheduled shutdown policy applied yesterday)", facts: {vm_stopped: true, vm_running: false}}
+  - id: L05
+    title: "Sales mart arrives on time but with a tenth of the rows"
+    story: "Every job succeeds, but the ERP ingest's incremental window was wrong and only 10% of the rows came through. The volume check on gold.sales_mart fails and the dashboard is held instead of showing wrong numbers."
+    tools: [Azure Data Factory, Databricks, Data quality, Power BI]
+    expect_ke: KE0306
+    faults:
+      - type: quality
+        at: "00:40"
+        node: lake.gold.sales_mart
+        after_job: dbx.job_gold_sales
+        check: volume_anomalies
+        fixed_by: adf.rerun_pipeline_full_window
+        reprocess: [adf.pl_erp_ingest, dbx.job_silver_sales, dbx.job_gold_sales]
+        message: "Row count 41,200 is outside the expected range 395,000 - 428,000"
+        evidence:
+          dq.volume_history: {summary: "gold.sales_mart has 41,200 rows; the last 14 loads were between 398,000 and 425,000", facts: {below_range: true}}
+          adf.copy_rows: {summary: "pl_erp_ingest copied 41,930 rows (7-day average 409,800): the incremental watermark was set to 22:00 instead of 00:00 the day before", facts: {rows_low: true}}
+
+presets:
+  quiet: {title: "Quiet night", scenarios: []}
+  typical: {title: "Typical bad night", scenarios: [L01, L03]}
+  everything: {title: "Everything at once", scenarios: [L02, L03, L04]}

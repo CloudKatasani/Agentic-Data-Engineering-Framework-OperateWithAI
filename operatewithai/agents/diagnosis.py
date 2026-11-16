@@ -54,6 +54,8 @@ def run(ops) -> None:
         else:
             for probe, args, says in GENERIC.get(ev["source"], []):
                 res = _probe(ops, probe, fmt(args, ctx))
+                if res["summary"].startswith("Check could not run"):
+                    continue
                 evidence.append({"check": says, "probe": probe, "result": res["summary"], "confirms": None})
             status = "unknown"
         res = _probe(ops, "change.recent", {"ci": ev["ci"]})

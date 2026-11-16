@@ -1,0 +1,385 @@
+# Technology catalogue: everything needed to support a tool without writing code.
+#   feeds    - the logs, telemetry, audit data and metadata the agents need (onboarding checklist)
+#   connect  - how the collectors reach the tool (address + NAME of the credential)
+#   events   - inbound endpoints (POST /api/ingest/<id>) described declaratively:
+#       kind: run       a job/pipeline/sync/refresh run. entity = field with the job name, status = field
+#                       with the state, failed/ok = values, message = field with the error text
+#       kind: lag       a backlog measure. entity, value (number), unit minutes; limit comes from the node
+#       kind: resource  a cluster, warehouse, runtime or connection. entity, status, bad/ok values, code
+#       kind: problem   a monitoring alert on a host or service. entity = host, status, open/closed values
+#       kind: quality   a data quality result. entity = table, status, failed/ok values, check = field with the test type
+#     Field names may be dotted paths (data.essentials.alertRule).
+#   patterns - text in an error message -> error code used to match the known error database
+#   rerun    - the catalogue action that runs one of this tool's jobs again
+# The original estate (Oracle, GoldenGate, Informatica, ...) is described in signals.yaml and endpoints.yaml.
+
+technologies:
+  - id: databricks
+    tool: "Databricks"
+    category: Lakehouse
+    clouds: [aws, azure, gcp]
+    access: "Service principal with CAN_VIEW on jobs and clusters, read on system tables (system.lakeflow, system.billing, system.access)"
+    connect: {what: "Workspace URL", example: "https://adb-1234567890123456.7.azuredatabricks.net", credential: "DATABRICKS_SP_SECRET"}
+    rerun: databricks.repair_run
+    feeds:
+      - {name: "Jobs runs (Jobs API runs/list, system.lakeflow.job_run_timeline)", type: Telemetry, gives: "Run state, result state, termination code, duration per task", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect failed and late runs; repair only the failed tasks; project finish times"}
+      - {name: "Run output and driver logs", type: Log, gives: "The exception behind a failed task (AnalysisException, OutOfMemoryError, Delta errors)", agents: [Diagnosis], enables: "Recognise schema mismatch, memory and concurrency errors"}
+      - {name: "Cluster events", type: Telemetry, gives: "Start failures, terminations, autoscaling, spot loss", agents: [Watch Desk, Diagnosis], enables: "Separate a cloud capacity problem from a code problem"}
+      - {name: "Delta table history (DESCRIBE HISTORY)", type: Audit, gives: "Who wrote what to a table and when, schema changes", agents: [Diagnosis], enables: "Tie a failure to the write or schema change that caused it"}
+      - {name: "DLT event log and expectations", type: Telemetry, gives: "Pipeline updates, data quality expectation results", agents: [Watch Desk, Diagnosis], enables: "Catch dropped or failing records before they reach consumers"}
+      - {name: "system.billing.usage", type: Telemetry, gives: "DBU consumption by job and cluster", agents: [Service Reporting, Problem and Knowledge], enables: "Report cost of reruns and oversized clusters"}
+    events:
+      - id: databricks
+        feed: "Job run state (Jobs API or job webhook)"
+        kind: run
+        entity: run_name
+        status: state.result_state
+        failed: [FAILED, TIMEDOUT, INTERNAL_ERROR]
+        ok: [SUCCESS]
+        message: state.state_message
+        sample: {job_id: 1012, run_id: 880123, run_name: job_gold_sales, state: {life_cycle_state: TERMINATED, result_state: FAILED,
+                 state_message: "Task gold_sales failed: org.apache.spark.sql.delta.ConcurrentAppendException: Files were added to the root of the table by a concurrent update."}}
+    patterns:
+      - {code: DELTA_SCHEMA_MISMATCH, match: "schema mismatch detected when writing to the Delta table"}
+      - {code: DBX_CLOUD_LAUNCH_FAILURE, match: "CLOUD_PROVIDER_LAUNCH_FAILURE"}
+      - {code: DBX_DRIVER_OOM, match: "java.lang.OutOfMemoryError"}
+      - {code: DELTA_CONCURRENT_APPEND, match: "ConcurrentAppendException"}
+
+  - id: redshift
+    tool: "Amazon Redshift"
+    category: Data warehouse
+    clouds: [aws]
+    access: "Database user with SYSLOG ACCESS UNRESTRICTED (read system views); CloudWatch metrics for the cluster or workgroup"
+    connect: {what: "Cluster or workgroup endpoint", example: "dw-prod.abc123.eu-west-1.redshift.amazonaws.com:5439/dw", credential: "REDSHIFT_MONITOR_SECRET_ARN"}
+    feeds:
+      - {name: "SYS_QUERY_HISTORY / STL_QUERY", type: Audit, gives: "Queries with user, duration, queue time, status and error", agents: [Diagnosis, Problem and Knowledge], enables: "Find the runaway query behind a disk or queue problem"}
+      - {name: "SYS_LOAD_ERROR_DETAIL / STL_LOAD_ERRORS", type: Log, gives: "COPY failures with file, line and reason", agents: [Watch Desk, Diagnosis], enables: "Name the file and column that broke a load"}
+      - {name: "CloudWatch: PercentageDiskSpaceUsed, WLM queue length, CPU", type: Telemetry, gives: "Storage and concurrency pressure", agents: [Watch Desk], enables: "Warn before the cluster fills or queues back up"}
+      - {name: "STV_LOCKS, SVV_TRANSACTIONS", type: Telemetry, gives: "Blocking transactions", agents: [Diagnosis], enables: "Show who is blocking a load"}
+      - {name: "SVV_TABLE_INFO", type: Metadata, gives: "Table size, skew, unsorted and stale statistics", agents: [Problem and Knowledge], enables: "Recommend vacuum, analyze or key changes for recurring slowness"}
+    events:
+      - id: redshift
+        feed: "Cluster health (CloudWatch alarm or poll of system views)"
+        kind: resource
+        entity: cluster
+        status: status
+        bad: [DISK_FULL, QUEUE_SATURATED, UNAVAILABLE]
+        ok: [HEALTHY]
+        code_prefix: REDSHIFT
+        message: detail
+        sample: {cluster: dw-prod, status: QUEUE_SATURATED, detail: "WLM queue 'etl' has 42 queries waiting; longest wait 31 min"}
+    patterns:
+      - {code: REDSHIFT_DISK_FULL, match: "Disk Full"}
+      - {code: REDSHIFT_SERIALIZABLE, match: "Serializable isolation violation"}
+      - {code: REDSHIFT_SPECTRUM_SCAN, match: "Spectrum Scan Error"}
+
+  - id: bigquery
+    tool: "Google BigQuery"
+    category: Data warehouse
+    clouds: [gcp]
+    access: "Service account with roles/bigquery.resourceViewer and roles/bigquery.metadataViewer (INFORMATION_SCHEMA.JOBS, no table data)"
+    connect: {what: "Project and region", example: "project acme-analytics-prod, region EU", credential: "GCP_OPS_SERVICE_ACCOUNT"}
+    feeds:
+      - {name: "INFORMATION_SCHEMA.JOBS", type: Audit, gives: "Every query and load job: user, bytes, slot time, error", agents: [Watch Desk, Diagnosis, Problem and Knowledge], enables: "Detect failed loads and queries; name the top consumer behind a quota breach"}
+      - {name: "Cloud Audit Logs (data access, admin activity)", type: Audit, gives: "Who changed datasets, IAM and quotas", agents: [Diagnosis, Service Request], enables: "Explain a sudden permission error; record access grants"}
+      - {name: "Reservation and slot utilisation, custom quotas", type: Telemetry, gives: "Slots used against commitment, bytes scanned against daily quota", agents: [Watch Desk, Batch and SLA], enables: "Warn before the nightly build runs out of slots or quota"}
+      - {name: "INFORMATION_SCHEMA.TABLE_STORAGE / PARTITIONS", type: Metadata, gives: "Last modified time and row counts per partition", agents: [Watch Desk], enables: "Detect a table that was not refreshed or lost volume"}
+    events:
+      - id: bigquery
+        feed: "Job result (INFORMATION_SCHEMA.JOBS row or log sink)"
+        kind: run
+        entity: labels.job_name
+        status: state
+        failed: [FAILED]
+        ok: [DONE]
+        message: error_result.message
+        sample: {job_id: bquxjob_5f2a, labels: {job_name: dag_marts_dbt}, state: FAILED,
+                 error_result: {reason: quotaExceeded, message: "Custom quota exceeded: Your usage exceeded the custom quota for QueryUsagePerDay, which is set by your administrator."}}
+    patterns:
+      - {code: BQ_QUOTA_EXCEEDED, match: "quota exceeded"}
+      - {code: BQ_RESOURCES_EXCEEDED, match: "Resources exceeded during query execution"}
+      - {code: BQ_ACCESS_DENIED, match: "Access Denied"}
+
+  - id: airflow
+    tool: "Apache Airflow (MWAA, Cloud Composer, Astronomer)"
+    category: Orchestration
+    clouds: [aws, azure, gcp]
+    access: "Read-only role on the REST API (DAG runs, task instances, logs); a failure callback or the OpenLineage provider for push"
+    connect: {what: "Web server / REST API URL", example: "https://airflow.internal.example.com/api/v1", credential: "AIRFLOW_API_TOKEN"}
+    rerun: airflow.clear_task
+    feeds:
+      - {name: "DAG runs and task instances", type: Telemetry, gives: "State, start, end, try number per task", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect failed and late DAGs; clear and rerun only the failed tasks"}
+      - {name: "Task logs", type: Log, gives: "The exception behind a failed task", agents: [Diagnosis], enables: "Recognise sensor timeouts, killed tasks and the downstream system's own error"}
+      - {name: "Scheduler and worker health (heartbeat, queue depth)", type: Telemetry, gives: "Whether tasks are being scheduled and picked up", agents: [Watch Desk], enables: "Tell a platform problem from a pipeline problem"}
+      - {name: "SLA misses and DAG run duration history", type: Telemetry, gives: "Typical and current run times", agents: [Batch and SLA], enables: "Project delivery times against deadlines"}
+    events:
+      - id: airflow
+        feed: "DAG run or task failure (callback or REST poll)"
+        kind: run
+        entity: dag_id
+        status: state
+        failed: [failed, upstream_failed]
+        ok: [success]
+        message: error
+        sample: {dag_id: dag_partner_extract, task_id: wait_for_manifest, run_id: "scheduled__2026-03-03T04:00:00", state: failed, try_number: 3,
+                 error: "airflow.exceptions.AirflowSensorTimeout: Sensor has timed out; run duration of 3600 seconds exceeds the specified timeout."}
+    patterns:
+      - {code: AIRFLOW_SENSOR_TIMEOUT, match: "AirflowSensorTimeout"}
+      - {code: AIRFLOW_TASK_KILLED, match: "Task received SIGTERM"}
+
+  - id: adf
+    tool: "Azure Data Factory / Synapse pipelines"
+    category: Ingestion and orchestration
+    clouds: [azure]
+    access: "Monitoring Reader on the factory; diagnostic settings to Log Analytics (ADFPipelineRun, ADFActivityRun)"
+    connect: {what: "Factory resource ID", example: "/subscriptions/0000/resourceGroups/rg-data/providers/Microsoft.DataFactory/factories/adf-prod", credential: "AZURE_MONITOR_SP_SECRET"}
+    rerun: adf.rerun_pipeline
+    feeds:
+      - {name: "ADFPipelineRun, ADFActivityRun", type: Telemetry, gives: "Pipeline and activity status, duration, error code and message", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect failed pipelines; rerun from the failed activity"}
+      - {name: "Integration runtime status", type: Telemetry, gives: "Self-hosted IR nodes online or offline, queue length", agents: [Watch Desk, Diagnosis], enables: "Confirm an offline runtime as the cause of copy failures"}
+      - {name: "Copy activity output (rows read, rows copied, skipped)", type: Telemetry, gives: "Volumes moved per run", agents: [Diagnosis, Batch and SLA], enables: "Spot a partial or empty load"}
+    events:
+      - id: adf
+        feed: "Pipeline run (Azure Monitor alert or ADFPipelineRun row)"
+        kind: run
+        entity: PipelineName
+        status: Status
+        failed: [Failed, Cancelled]
+        ok: [Succeeded]
+        message: Message
+        sample: {PipelineName: pl_erp_ingest, RunId: 7f3c, Status: Failed, FailureType: UserError,
+                 Message: "ErrorCode=UserErrorSourceBlobNotExist,'Type=Microsoft.DataTransfer.Common.Shared.HybridDeliveryException,Message=The required Blob is missing. Folder path: landing/erp/2026-03-03.'"}
+    patterns:
+      - {code: ADF_IR_OFFLINE, match: "Integration Runtime"}
+      - {code: ADF_SOURCE_MISSING, match: "UserErrorSourceBlobNotExist"}
+      - {code: ADF_SQL_CONNECT, match: "SqlFailedToConnect"}
+
+  - id: glue
+    tool: "AWS Glue"
+    category: Ingestion and transformation
+    clouds: [aws]
+    access: "Read-only IAM role: glue:GetJobRun(s), CloudWatch Logs for /aws-glue/jobs; EventBridge rule for job state change"
+    connect: {what: "Account, region and job prefix", example: "123456789012 / eu-west-1 / prod-*", credential: "AWS role assumed by the collector"}
+    rerun: glue.start_job_run
+    feeds:
+      - {name: "Job run state change (EventBridge)", type: Telemetry, gives: "SUCCEEDED, FAILED, TIMEOUT with error message", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect failed and timed-out jobs; start them again"}
+      - {name: "CloudWatch Logs /aws-glue/jobs/error", type: Log, gives: "Driver and executor errors", agents: [Diagnosis], enables: "Recognise memory, permission and source errors"}
+      - {name: "Job metrics (DPU hours, executor memory)", type: Telemetry, gives: "Resource use per run", agents: [Diagnosis, Service Reporting], enables: "Justify a worker increase with evidence"}
+      - {name: "Glue Data Catalog and crawler runs", type: Metadata, gives: "Table definitions and schema changes", agents: [Diagnosis], enables: "Detect a schema change in landed files"}
+    events:
+      - id: glue
+        feed: "Job run state change (EventBridge detail)"
+        kind: run
+        entity: detail.jobName
+        status: detail.state
+        failed: [FAILED, TIMEOUT, ERROR]
+        ok: [SUCCEEDED]
+        message: detail.message
+        sample: {source: aws.glue, "detail-type": "Glue Job State Change", detail: {jobName: glue_curate_shipments, state: FAILED, jobRunId: jr_91aa,
+                 message: "An error occurred while calling o112.pyWriteDynamicFrame. Access Denied (Service: Amazon S3; Status Code: 403)"}}
+    patterns:
+      - {code: GLUE_OOM, match: "exceeding memory limits"}
+      - {code: GLUE_TIMEOUT, match: "Job run exceeded timeout"}
+      - {code: AWS_ACCESS_DENIED, match: "Access Denied"}
+
+  - id: kafka
+    tool: "Apache Kafka (Confluent, MSK, Event Hubs)"
+    category: Streaming
+    clouds: [aws, azure, gcp]
+    access: "Read-only principal: describe on consumer groups and topics; Kafka Connect REST; metrics through the monitoring tool"
+    connect: {what: "Bootstrap servers and Connect REST URL", example: "pkc-xxxxx.westeurope.azure.confluent.cloud:9092 / https://connect-prod:8083", credential: "KAFKA_OPS_API_KEY"}
+    rerun: kafka.restart_connector_task
+    feeds:
+      - {name: "Consumer group lag", type: Telemetry, gives: "Messages and time behind per group and partition", agents: [Watch Desk, Batch and SLA], enables: "Detect a stalled consumer; track a freshness SLO"}
+      - {name: "Kafka Connect connector and task status", type: Telemetry, gives: "RUNNING, FAILED, PAUSED with the task's stack trace", agents: [Watch Desk, Diagnosis, Resolution], enables: "Find the failed task and restart it"}
+      - {name: "Schema Registry compatibility errors", type: Log, gives: "Producers rejected for an incompatible schema", agents: [Diagnosis], enables: "Tie a stalled stream to an upstream schema change"}
+      - {name: "Dead letter queue depth", type: Telemetry, gives: "Records that could not be processed", agents: [Watch Desk], enables: "Catch silent data loss"}
+    events:
+      - id: kafka
+        feed: "Consumer group lag (poll or exporter)"
+        kind: lag
+        entity: group
+        value: lag_minutes
+        code: KAFKA_CONSUMER_LAG
+        sample: {group: cg-orders-lakehouse, topic: orders.v1, lag_messages: 184220, lag_minutes: 37}
+      - id: kafka_connect
+        feed: "Connector task status (Connect REST)"
+        kind: resource
+        entity: name
+        status: tasks.0.state
+        bad: [FAILED]
+        ok: [RUNNING]
+        code_prefix: KAFKA_CONNECT_TASK
+        message: tasks.0.trace
+        sample: {name: sink-orders-adls, connector: {state: RUNNING}, tasks: [{id: 0, state: FAILED,
+                 trace: "org.apache.kafka.connect.errors.ConnectException: Exiting WorkerSinkTask due to unrecoverable exception. Caused by: java.io.IOException: AzureBlobStorage 503 ServerBusy"}]}
+
+  - id: fivetran
+    tool: "Fivetran (and similar SaaS ingestion: Airbyte, Stitch)"
+    category: Ingestion
+    clouds: [aws, azure, gcp]
+    access: "API key with read on connectors and logs; webhook for sync_end; Platform Connector log tables"
+    connect: {what: "API base and destination group", example: "https://api.fivetran.com/v1 (group prod_dw)", credential: "FIVETRAN_API_SECRET"}
+    rerun: fivetran.resync
+    feeds:
+      - {name: "Connector sync status (webhook sync_end, API)", type: Telemetry, gives: "Success or failure, reason, rows synced, schema changes", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect a failed or late sync; trigger it again"}
+      - {name: "Platform Connector LOG table", type: Log, gives: "Warnings, errors and schema change events per connector", agents: [Diagnosis], enables: "Recognise expired credentials and source-side changes"}
+      - {name: "Monthly active rows", type: Telemetry, gives: "Usage against the plan", agents: [Service Reporting], enables: "Report cost drivers"}
+    events:
+      - id: fivetran
+        feed: "sync_end webhook"
+        kind: run
+        entity: connector_name
+        status: data.status
+        failed: [FAILURE, FAILURE_WITH_TASK]
+        ok: [SUCCESSFUL]
+        message: data.reason
+        sample: {event: sync_end, connector_name: salesforce_prod, connector_type: salesforce, data: {status: FAILURE,
+                 reason: "INVALID_LOGIN: Authentication failed. The refresh token has expired or been revoked."}}
+    patterns:
+      - {code: FIVETRAN_AUTH_FAILED, match: "Authentication failed"}
+      - {code: FIVETRAN_SCHEMA_CHANGE, match: "schema change"}
+
+  - id: tableau
+    tool: "Tableau"
+    category: BI and consumption
+    clouds: [aws, azure, gcp]
+    access: "Site administrator explorer (read) for the REST API and the Admin Insights data sources"
+    connect: {what: "Server or Cloud site URL", example: "https://eu-west-1a.online.tableau.com/#/site/acme", credential: "TABLEAU_PAT"}
+    rerun: tableau.refresh_extract
+    feeds:
+      - {name: "Background jobs (extract refreshes, subscriptions)", type: Telemetry, gives: "Status, duration and error per job", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect a failed refresh; run it again once the source is back"}
+      - {name: "Admin Insights: TS Events, Job Performance", type: Audit, gives: "Who viewed, published or refreshed", agents: [Service Reporting], enables: "Report whether the dashboard was ready when users opened it"}
+    events:
+      - id: tableau
+        feed: "Extract refresh job (webhook datasource-refresh-failed/succeeded or REST poll)"
+        kind: run
+        entity: resource_name
+        status: status
+        failed: [Failed]
+        ok: [Success]
+        message: notes
+        sample: {event_type: DatasourceRefreshFailed, resource_name: "Shipments Daily", status: Failed,
+                 notes: "[Amazon][Redshift ODBC] (30) Error occurred while trying to execute a query: ERROR: Query cancelled on user's request"}
+
+  - id: looker
+    tool: "Looker"
+    category: BI and consumption
+    clouds: [gcp, aws, azure]
+    access: "API3 key with see_schedules, see_pdts, see_system_activity"
+    connect: {what: "Instance URL", example: "https://acme.cloud.looker.com:19999/api/4.0", credential: "LOOKER_API3_SECRET"}
+    rerun: looker.rebuild_pdt
+    feeds:
+      - {name: "System Activity: scheduled_plan, pdt_event_log", type: Telemetry, gives: "Schedule deliveries and PDT builds with status and error", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect a failed delivery or PDT build; rebuild it"}
+      - {name: "System Activity: history", type: Audit, gives: "Queries, users, runtimes, errors", agents: [Diagnosis, Service Reporting], enables: "Find broken explores after a model change"}
+    events:
+      - id: looker
+        feed: "Schedule or PDT event"
+        kind: run
+        entity: name
+        status: status
+        failed: [failure, error]
+        ok: [success]
+        message: message
+        sample: {name: "Clinic Activity Daily", type: scheduled_plan, status: failure, message: "PDT 'clinic_activity_daily' build failed: Access Denied: Table acme:marts.fct_visits"}
+
+  - id: gcp
+    tool: "Google Cloud (Monitoring, Pub/Sub, Dataflow)"
+    category: Cloud and streaming
+    clouds: [gcp]
+    access: "roles/monitoring.viewer, roles/logging.viewer, roles/pubsub.viewer, roles/dataflow.viewer; a Pub/Sub notification channel for alert policies"
+    connect: {what: "Project", example: "acme-analytics-prod", credential: "GCP_OPS_SERVICE_ACCOUNT"}
+    rerun: dataflow.restart_job
+    feeds:
+      - {name: "Cloud Monitoring incidents (alert policies)", type: Telemetry, gives: "Opened and closed incidents on VMs, Composer, Dataflow, Pub/Sub", agents: [Watch Desk, Triage], enables: "See an infrastructure cause before the pipelines that depend on it fail"}
+      - {name: "Pub/Sub subscription backlog (oldest unacked message age)", type: Telemetry, gives: "How far behind each subscriber is", agents: [Watch Desk, Batch and SLA], enables: "Track streaming freshness SLOs"}
+      - {name: "Dataflow job state and worker logs", type: Log, gives: "Job failures, stuck steps, autoscaling events", agents: [Diagnosis, Resolution], enables: "Recognise a stuck streaming job and restart it"}
+      - {name: "Cloud Audit Logs", type: Audit, gives: "Who changed IAM, quotas and resources", agents: [Diagnosis], enables: "Explain why something changed"}
+    events:
+      - id: pubsub
+        feed: "Subscription backlog (oldest unacked message age)"
+        kind: lag
+        entity: subscription
+        value: oldest_unacked_minutes
+        code: STREAM_BACKLOG
+        sample: {subscription: sub-visits-bq, oldest_unacked_minutes: 44, num_undelivered_messages: 912004}
+      - id: dataflow
+        feed: "Dataflow job state"
+        kind: resource
+        entity: name
+        status: currentState
+        bad: [JOB_STATE_FAILED, JOB_STATE_STALLED]
+        ok: [JOB_STATE_RUNNING]
+        code_prefix: DATAFLOW_JOB
+        message: detail
+        sample: {name: df-visits-stream, currentState: JOB_STATE_FAILED, detail: "Workflow failed. Causes: The Dataflow job appears to be stuck because no worker activity has been seen in the last 1h."}
+      - id: gcp_monitoring
+        feed: "Cloud Monitoring incident (webhook or Pub/Sub channel)"
+        kind: problem
+        entity: incident.resource_name
+        status: incident.state
+        open: [open]
+        closed: [closed]
+        title: incident.policy_name
+        sample: {incident: {incident_id: "0.abc", state: open, policy_name: "Composer scheduler unhealthy", resource_name: composer-prod, summary: "Scheduler heartbeat missing for 10 minutes"}}
+
+  - id: reverse_etl
+    tool: "Reverse ETL (Hightouch, Census)"
+    category: BI and consumption
+    clouds: [aws, azure, gcp]
+    access: "API token with read on syncs and sync runs; sync alerting webhook"
+    connect: {what: "Workspace API", example: "https://api.hightouch.com/api/v1", credential: "REVERSE_ETL_API_TOKEN"}
+    rerun: reverse_etl.trigger_sync
+    feeds:
+      - {name: "Sync runs", type: Telemetry, gives: "Status, rows added/changed/rejected, destination errors", agents: [Watch Desk, Batch and SLA, Resolution], enables: "Detect a failed or partial sync into the business application; run it again"}
+      - {name: "Rejected rows report", type: Log, gives: "Why the destination refused records (keys and reason only)", agents: [Diagnosis], enables: "Separate a destination limit from a data problem"}
+    events:
+      - id: reverse_etl
+        feed: "Sync run finished"
+        kind: run
+        entity: sync_name
+        status: status
+        failed: [failed, warning]
+        ok: [success]
+        message: error
+        sample: {sync_name: crm_audience_sync, status: failed, error: "Destination error: REQUEST_LIMIT_EXCEEDED: TotalRequests Limit exceeded."}
+
+  - id: data_quality
+    tool: "Data quality and observability (Elementary, Soda, Great Expectations, dbt tests)"
+    category: Data quality
+    clouds: [aws, azure, gcp]
+    access: "Read on the results the tool already writes: elementary_test_results, Soda scan results, GX validation results, dbt run_results.json"
+    connect: {what: "Results location", example: "warehouse schema elementary / s3://dq-results/", credential: "none beyond the warehouse monitoring role"}
+    feeds:
+      - {name: "Test and monitor results", type: Telemetry, gives: "Pass or fail per table for freshness, volume, schema and value checks", agents: [Watch Desk, Triage, Diagnosis], enables: "Catch data that arrived on time but is wrong: too few rows, changed columns, stale"}
+      - {name: "Anomaly detection history", type: Telemetry, gives: "Expected ranges for volume and freshness per table", agents: [Diagnosis], enables: "Show how far today's load is from normal"}
+    events:
+      - id: data_quality
+        feed: "Check result (one failing or passing check)"
+        kind: quality
+        entity: table
+        status: status
+        failed: [fail, error]
+        ok: [pass]
+        check: test_type
+        message: description
+        sample: {table: "analytics.gold.sales_mart", test_type: volume_anomalies, status: fail, description: "Row count 41,200 is outside the expected range 395,000 - 428,000"}
+
+  - id: openlineage
+    tool: "OpenLineage (any orchestrator or engine that emits it)"
+    category: Orchestration
+    clouds: [aws, azure, gcp]
+    access: "Point the tool's OpenLineage transport (HTTP) at the ingest endpoint"
+    connect: {what: "Nothing to pull: producers push", example: "HTTP transport with url <this server>/api/ingest/openlineage", credential: "API token as bearer"}
+    feeds:
+      - {name: "RunEvent (START, COMPLETE, FAIL, ABORT)", type: Telemetry, gives: "Job runs with inputs, outputs and the error facet, in one vendor-neutral format", agents: [Watch Desk, Triage, Batch and SLA], enables: "Onboard Airflow, Spark, dbt, Flink or Dagster without a tool-specific connector; keep lineage current"}
+    events:
+      - id: openlineage
+        feed: "RunEvent"
+        kind: run
+        entity: job.name
+        status: eventType
+        failed: [FAIL, ABORT]
+        ok: [COMPLETE]
+        message: run.facets.errorMessage.message
+        sample: {eventType: FAIL, eventTime: "2026-03-03T02:41:00Z", job: {namespace: prod, name: job_silver_sales}, run: {runId: "3f5e", facets: {errorMessage: {message: "java.lang.OutOfMemoryError: GC overhead limit exceeded", programmingLanguage: JAVA}}}}

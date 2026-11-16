@@ -48,9 +48,10 @@ def project(ops) -> dict:
         if kind == "source":
             out = past
         elif kind == "file":
-            out = past if bs["file_received"] else (fix_eta(node) or now + timedelta(minutes=60))
-        elif kind == "replication":
-            lag = bs["lag_minutes"]
+            received = bs.get("files", {}).get(node, bs["file_received"])
+            out = past if received else (fix_eta(node) or now + timedelta(minutes=60))
+        elif kind in ("replication", "stream"):
+            lag = bs.get("lags", {}).get(node, bs["lag_minutes"])
             out = past if bs["ready"].get(node) and lag <= n["max_lag_minutes"] else (fix_eta(node) or now) + timedelta(minutes=lag / 4 + 5)
         elif kind == "job":
             out = job_end(node)
@@ -98,11 +99,22 @@ def project(ops) -> dict:
                      "pct": st["pct"], "late_minutes": max(0, round((end - planned_end).total_seconds() / 60)), "error": st["error"]}
     services = {}
     for sid, s in env.services.items():
-        deadline = hhmm(day, s["deadline"])
         job = s["delivered_by"]
-        eta = datetime.fromisoformat(jobs[job]["eta"])
         chain = set(env.chain(sid))
         blocking = [i["id"] for i in incs if chain & set(i.get("impact_nodes", []))]
+        common = {"id": sid, "name": s["name"], "tier": s.get("tier", 2), "regulated": s.get("regulated", False), "audience": s["audience"],
+                  "delivered_by": job, "pattern": s.get("pattern", "")}
+        if not s.get("deadline"):            # a freshness promise: "never more than N minutes behind"
+            stream = next((n for n in env.chain(sid) if env.nodes[n]["kind"] in ("stream", "replication")), job)
+            lag = bs.get("lags", {}).get(stream, bs["lag_minutes"])
+            limit = s["max_lag_minutes"]
+            back = avail(job)
+            services[sid] = {**common, "kind": "freshness", "deadline": now.isoformat(), "eta": max(back, now).isoformat(),
+                             "status": "on track" if lag <= limit else "breached", "slack_minutes": round(limit - lag),
+                             "blocking": blocking, "due": f"within {limit} min", "est": f"{lag:.0f} min behind"}
+            continue
+        deadline = hhmm(day, s["deadline"])
+        eta = datetime.fromisoformat(jobs[job]["eta"])
         if jobs[job]["state"] == "succeeded":
             status = "delivered" if eta <= deadline else "delivered late"
         elif now > deadline:
@@ -113,8 +125,8 @@ def project(ops) -> dict:
             status = "at risk"
         else:
             status = "on track"
-        services[sid] = {"id": sid, "name": s["name"], "deadline": deadline.isoformat(), "eta": eta.isoformat(), "status": status,
+        services[sid] = {**common, "kind": "deadline", "deadline": deadline.isoformat(), "eta": eta.isoformat(), "status": status,
                          "slack_minutes": round((deadline - eta).total_seconds() / 60), "blocking": blocking if "delivered" not in status else [],
-                         "tier": s.get("tier", 2), "regulated": s.get("regulated", False), "audience": s["audience"], "delivered_by": job}
+                         "due": s["deadline"], "est": eta.strftime("%H:%M")}
     return {"now": now.isoformat(), "jobs": jobs, "services": services, "ready": bs["ready"], "built": bs["built"],
-            "lag_minutes": bs["lag_minutes"]}
+            "lag_minutes": bs["lag_minutes"], "lags": bs.get("lags", {})}

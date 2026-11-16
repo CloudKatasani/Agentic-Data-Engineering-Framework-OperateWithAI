@@ -1,3 +1,3 @@
 """OpsCrew-OperateWithAI: AI agents and people running a data platform managed service."""
 
-__version__ = "2.4.0"
+__version__ = "3.0.0"

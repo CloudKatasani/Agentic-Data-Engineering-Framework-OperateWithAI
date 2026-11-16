@@ -155,14 +155,21 @@ def dynatrace(env, p: dict) -> list[dict]:
 
 
 def mft(env, f: dict) -> list[dict]:
-    node = "mft.claims_file"
+    node = next((n["id"] for n in env.nodes.values() if n["kind"] == "file" and n.get("ref") == f["feed"]), None) \
+        or next((n["id"] for n in env.nodes.values() if n["kind"] == "file"), None)
+    if not node:
+        return []
+    return _mft(env, f, node, env.nodes[node]["ci"])
+
+
+def _mft(env, f: dict, node: str, ci: str) -> list[dict]:
     if f["status"] == "MISSING":
-        return [_alert("mft", "MFT_GATEWAY", f["feed"], "arrival", "major", f"{f['expected_file']} not received by {f['expected_by']} from {f['partner']}",
+        return [_alert("mft", ci, f["feed"], "arrival", "major", f"{f['expected_file']} not received by {f['expected_by']} from {f['partner']}",
                        ["MFT_FILE_MISSING"], node=node)]
-    out = [_alert("mft", "MFT_GATEWAY", f["feed"], "arrival", "major", node=node, clear=True)]
+    out = [_alert("mft", ci, f["feed"], "arrival", "major", node=node, clear=True)]
     ratio = f["size_bytes"] / f["avg_size_bytes_7d"]
     if ratio >= 1.8 or ratio <= 0.4:
-        out.append(_alert("mft", "MFT_GATEWAY", f["feed"], "size", "warning", f"{f['expected_file']} is {ratio:.1f}x its 7-day average size",
+        out.append(_alert("mft", ci, f["feed"], "size", "warning", f"{f['expected_file']} is {ratio:.1f}x its 7-day average size",
                           ["MFT_SIZE_ANOMALY"], node=node, facts={"size_ratio": round(ratio, 2)}))
     return out
 
@@ -246,7 +253,85 @@ PARSERS = {"oracle_alert": oracle_alert, "db2": db2, "aws": aws, "azure": azure,
            "cognos": cognos, "denodo": denodo, "dynatrace": dynatrace, "mft": mft, "snowflake": snowflake, "oracle": oracle}
 
 
-def parse(env: Environment, telemetry: list[tuple[str, Any]]) -> list[dict]:
+# ---------------------------------------------------------------------------- declarative (tech.yaml)
+def _get(obj: Any, path: str) -> Any:
+    for part in str(path).split("."):
+        if isinstance(obj, list):
+            obj = obj[int(part)] if part.isdigit() and int(part) < len(obj) else None
+        elif isinstance(obj, dict):
+            obj = obj.get(part)
+        else:
+            return None
+    return obj
+
+
+def _find_node(env, tech: str, entity: str, attr: str = "ref") -> str | None:
+    entity = str(entity or "")
+    for n in env.nodes.values():
+        if entity and (n.get(attr) == entity or n.get("ref") == entity):
+            return n["id"]
+    return next((n["id"] for n in env.nodes.values() if entity and env.cis[n["ci"]]["tool"] == tech and entity in n["name"]), None)
+
+
+def _tool_ci(env, tech: str) -> str | None:
+    return next((c["id"] for c in env.cis.values() if c["tool"] == tech), None)
+
+
+def generic(env, spec: dict, payload: Any, patterns: list[dict]) -> list[dict]:
+    """Parse one payload with a declarative event description from the technology catalogue."""
+    if not isinstance(payload, dict):
+        raise ValueError("expected a JSON object")
+    tech, kind = spec["tech"], spec["kind"]
+    entity = _get(payload, spec["entity"])
+    if entity is None:
+        raise KeyError(spec["entity"])
+    entity = str(entity)
+    msg = " ".join(str(_get(payload, spec["message"]) or "").split()) if spec.get("message") else ""
+    codes = codes_in(msg) + [p["code"] for p in patterns if p["match"].lower() in msg.lower()]
+    node = _find_node(env, tech, entity, "table" if kind == "quality" else "ref")
+    ci = env.nodes[node]["ci"] if node else _tool_ci(env, tech)
+    if kind == "problem":
+        ci = next((c["id"] for c in env.cis.values() if entity in (c.get("host"), c["id"])), None)
+    if not ci:
+        return []                       # this client does not run the tool, or the object is not in its model
+    status = _get(payload, spec["status"]) if spec.get("status") else None
+    if kind == "run":
+        if status in spec["failed"]:
+            return [_alert(tech, ci, entity, "run", "critical", f"{entity} failed: {msg}" if msg else f"{entity} failed", codes, node=node)]
+        return [_alert(tech, ci, entity, "run", "critical", node=node, clear=True)] if status in spec["ok"] else []
+    if kind == "lag":
+        value = float(_get(payload, spec["value"]) or 0)
+        limit = env.nodes[node].get("max_lag_minutes", 15) if node else 15
+        over = value > limit
+        return [_alert(tech, ci, entity, "lag", "major", f"{entity} is {value:.0f} min behind (limit {limit})", [spec["code"]] if over else [],
+                       node=node, facts={"lag_minutes": value}, clear=not over)]
+    if kind == "resource":
+        nodes = [n["id"] for n in env.nodes.values() if n.get("resource") == entity]
+        if status in spec["bad"]:
+            code = f"{spec['code_prefix']}_{status}"
+            a = _alert(tech, ci, entity, "state", "critical", f"{entity} is {status}" + (f": {msg}" if msg else ""), [code] + codes, node=node, facts={"resource": entity})
+            a["nodes"] = nodes
+            return [a]
+        return [_alert(tech, ci, entity, "state", "critical", node=node, clear=True)] if status in spec["ok"] else []
+    if kind == "problem":
+        title = str(_get(payload, spec.get("title", "")) or "Monitoring alert")
+        return [_alert(tech, ci, entity, "problem", "critical", f"{title} on {entity}", ["HOST_ALARM", f"HOST_ALARM:{entity}"], facts={"host": entity},
+                       clear=status in spec["closed"])]
+    if kind == "quality":
+        check = str(_get(payload, spec["check"]) or "test").lower()
+        family = "FRESHNESS" if "fresh" in check else "VOLUME" if "volume" in check or "row_count" in check else "SCHEMA" if "schema" in check else "TEST"
+        if status in spec["failed"]:
+            return [_alert(tech, ci, entity, f"dq_{family.lower()}", "major", f"Data quality check {check} failed on {entity}: {msg}", [f"DQ_{family}"], node=node,
+                           facts={"check": check})]
+        return [_alert(tech, ci, entity, f"dq_{family.lower()}", "major", node=node, clear=True)] if status in spec["ok"] else []
+    return []
+
+
+def known_source(kb, source: str) -> bool:
+    return source in PARSERS or source in kb.event_specs
+
+
+def parse(env: Environment, telemetry: list[tuple[str, Any]], kb=None) -> list[dict]:
     """Parse a batch of raw tool output. Causes (databases, hosts, feeds) sort before the
     tools that only show the symptom, so correlation sees the cause first."""
     alerts: list[dict] = []
@@ -254,4 +339,6 @@ def parse(env: Environment, telemetry: list[tuple[str, Any]]) -> list[dict]:
         fn = PARSERS.get(source)
         if fn:
             alerts.extend(fn(env, payload))
+        elif kb and source in kb.event_specs:
+            alerts.extend(generic(env, kb.event_specs[source], payload, kb.patterns))
     return alerts

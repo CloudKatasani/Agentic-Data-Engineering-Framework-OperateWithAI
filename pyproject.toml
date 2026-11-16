@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "operatewithai"
-version = "2.4.0"
+version = "3.0.0"
 description = "OpsCrew-OperateWithAI: AI agents and people running a data platform managed service (ADEF suite)"
 requires-python = ">=3.11"
 dependencies = ["PyYAML>=6.0", "fastapi>=0.115", "uvicorn>=0.30", "httpx>=0.27"]
@@ -17,7 +17,7 @@ llm = ["anthropic>=2.8"]
 include = ["operatewithai*"]
 
 [tool.setuptools.package-data]
-operatewithai = ["clients/*/*.yaml", "knowledge/*.yaml", "web/*.html", "web/*.js", "web/*.css", "web/fonts/*"]
+operatewithai = ["clients/*.yaml", "clients/*/*.yaml", "knowledge/*.yaml", "web/*.html", "web/*.js", "web/*.css", "web/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

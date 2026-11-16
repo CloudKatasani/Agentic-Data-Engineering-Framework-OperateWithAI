@@ -1,0 +1,42 @@
+# Google Cloud estate: Pub/Sub and Dataflow streaming into BigQuery, Cloud Composer running
+# dbt, consumed by Looker and an operational near-real-time feed. Synthetic.
+client:
+  id: gcp
+  name: "Verity Clinics (synthetic demo client)"
+  stack: "Pub/Sub and Dataflow streaming, BigQuery, Cloud Composer (Airflow) with dbt, Looker on Google Cloud"
+  sim: generic
+  itsm: ServiceNow
+  batch_day_start: "00:30"
+
+towers:
+  - {id: watch,  name: "L1 Watch Desk",                    seat: "L1 Operator"}
+  - {id: stream, name: "Streaming - Pub/Sub and Dataflow", seat: "Streaming Engineer"}
+  - {id: dw,     name: "Warehouse - BigQuery and Composer", seat: "Warehouse Engineer"}
+  - {id: bi,     name: "Consumption - Looker",             seat: "Consumption Engineer"}
+
+cis:
+  - {id: GCP_STREAM, tool: gcp,      name: "Pub/Sub and Dataflow",      tower: stream, cloud: gcp}
+  - {id: BIGQUERY,   tool: bigquery, name: "BigQuery project",          tower: dw,     cloud: gcp}
+  - {id: COMPOSER,   tool: airflow,  name: "Cloud Composer environment", tower: dw,    host: composer-prod, cloud: gcp}
+  - {id: LOOKER,     tool: looker,   name: "Looker instance",           tower: bi,     cloud: gcp}
+
+nodes:
+  - {id: src.clinics,           ci: GCP_STREAM, kind: source,  name: "Clinic visit events"}
+  - {id: gcp.sub_visits,        ci: GCP_STREAM, kind: stream,  name: "Pub/Sub sub-visits-bq through Dataflow", ref: sub-visits-bq, max_lag_minutes: 15, resource: df-visits-stream}
+  - {id: bq.raw.visits,         ci: BIGQUERY,   kind: dataset, name: "raw.visits (streaming inserts)"}
+  - {id: airflow.dag_marts_dbt, ci: COMPOSER,   kind: job,     name: "Composer DAG dag_marts_dbt (dbt build on BigQuery)", ref: dag_marts_dbt, planned: "02:00", duration: 45}
+  - {id: bq.mart.visits,        ci: BIGQUERY,   kind: dataset, name: "marts.fct_visits", table: "marts.fct_visits"}
+  - {id: looker.clinic_activity, ci: LOOKER,    kind: job,     name: "Looker schedule Clinic Activity Daily", ref: "Clinic Activity Daily", planned: "05:00", duration: 15}
+
+edges:
+  - [src.clinics, gcp.sub_visits]
+  - [gcp.sub_visits, bq.raw.visits]
+  - [bq.raw.visits, airflow.dag_marts_dbt]
+  - [airflow.dag_marts_dbt, bq.mart.visits]
+  - [bq.mart.visits, looker.clinic_activity]
+
+services:
+  - {id: BS-CLINIC-DASH, name: "Clinic Activity Daily", pattern: "Scheduled BI delivery (Looker)", delivered_by: looker.clinic_activity, deadline: "06:30", tier: 1,
+     owner_role: data_owner, audience: "Regional clinic managers"}
+  - {id: BS-VISITS-FEED, name: "Live visits feed", pattern: "Operational feed (near real time)", delivered_by: bq.raw.visits, max_lag_minutes: 15, tier: 1,
+     owner_role: data_owner, audience: "Capacity planning desk"}

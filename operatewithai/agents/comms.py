@@ -27,7 +27,7 @@ def _outlook(ops, inc: dict) -> tuple[str, str]:
         s = (ops.projection.get("services") or {}).get(sid)
         if not s:
             continue
-        lines.append(f"- {s['name']}: due {s['deadline'][11:16]}, current estimate {s['eta'][11:16]} ({s['status']})")
+        lines.append(f"- {s['name']}: promised {s['due']}, currently {s['est']} ({s['status']})")
         if order.index(s["status"]) > order.index(worst):
             worst = s["status"]
     return "\n".join(lines), worst
