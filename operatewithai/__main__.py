@@ -18,7 +18,8 @@ def main() -> None:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8090)
     s.add_argument("--scenarios", default="typical", help="Preset (quiet, typical, everything) or a comma list such as S01,S06")
-    s.add_argument("--until", default="01:20", help="Run the night to this time before serving (HH:MM)")
+    s.add_argument("--until", default="", help="Run the night to this time before serving (HH:MM); default: stop at the first detection")
+    s.add_argument("--fast", action="store_true", help="Agents hand off to each other without a person confirming each step")
     s.add_argument("--autotick", type=float, default=0, help="Advance the simulated clock 5 minutes every N seconds")
     n = sub.add_parser("night", help="Run a night without people and print what the agents did and what waits on whom")
     n.add_argument("--scenarios", default="typical")
@@ -54,8 +55,11 @@ def main() -> None:
 
         from .api.app import create_app
         svc = Service()
-        svc.restart(pick(a.scenarios))
-        svc.run_until(a.until)
+        svc.restart(pick(a.scenarios), guided=not a.fast)
+        if a.until:
+            svc.run_until(a.until)
+        else:
+            svc.run_to_first_issue()
         uvicorn.run(create_app(svc, autotick=a.autotick or None), host=a.host, port=a.port, log_level="warning")
 
 

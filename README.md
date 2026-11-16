@@ -20,8 +20,8 @@ Part of the ADEF suite next to Build-With-AI; the console shares its look and co
 ./run.sh
 ```
 
-Open http://127.0.0.1:8090. It starts a simulated night at a demo client at 01:20 with the
-"typical bad night" preset: an expired Oracle service account, a duplicate vendor file and,
+Open http://127.0.0.1:8090. It starts a simulated night at a demo client with the
+"typical bad night" preset, paused at the first thing the agents detect: an expired Oracle service account, a duplicate vendor file and,
 later, a Power BI gateway outage. Choose which seat you are in the sidebar (Oracle DBA, Incident Manager, Security Lead ...), answer that inbox, and
 move the clock with the buttons at the top.
 
@@ -34,6 +34,24 @@ python -m operatewithai scenarios                      # the ten scenarios
 python -m operatewithai night --scenarios S01,S06      # run a night in the terminal with nobody answering
 pytest -q
 ```
+
+## Live run, step by step
+
+For a demonstration, open **Scenario simulator**, pick what goes wrong and start the night.
+The **Live run** page then shows each issue as a pipeline:
+
+`Detect → Triage → Diagnose → Plan → Fix and recover → Resolve → Inform the client → Learn`
+
+Each stage shows the agent that did it and what it produced, then waits for the person whose
+decision comes next: the L1 Operator confirms the detection, the engineer acknowledges, agrees
+with the diagnosis and accepts the plan, the named role approves its step, the engineer confirms
+the fix. The next agent starts only after that decision. Buttons on this page answer as the
+role the agent asked, so one presenter can walk the whole flow. "Continue to the next event"
+moves the clock to the next thing that happens.
+
+Two modes: **step by step** (the default; a person confirms every hand-off) and **fast**
+(agents hand off to each other; people approve plans, fixes and client messages).
+`./run.sh --fast` starts in fast mode.
 
 ## What a night looks like
 

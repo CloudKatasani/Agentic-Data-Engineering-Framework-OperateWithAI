@@ -287,3 +287,54 @@ def test_api_and_console(monkeypatch):
     c2 = TestClient(create_app(svc))
     assert c2.get("/api/overview").status_code == 401 and c2.get("/api/health").status_code == 200
     assert c2.get("/api/overview", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+
+
+# ------------------------------------------------------------------ step-by-step (guided) mode
+def guided_night(ids):
+    svc = Service()
+    svc.restart(ids, guided=True)
+    svc.run_to_first_issue()
+    return svc
+
+
+def test_guided_mode_waits_for_a_person_between_every_agent():
+    svc = guided_night(["S03"])
+    assert incidents(svc) == []                                   # detected, not yet a ticket
+    det = ask(svc, "detect")
+    assert det["to"] == "L1 Operator" and "SVC_DATA" in det["title"]
+    assert len([n for n in svc.ops.notes() if n["kind"] == "detect"]) == 1    # Oracle and GoldenGate alerts are shown together
+    svc.act(det["id"], "L1 Operator", "confirm")
+    (inc,) = incidents(svc)
+    assert len(inc["events"]) >= 2 and inc["diagnosis"] is None   # triage done, diagnosis waits for the acknowledgement
+    svc.act(ask(svc, "ack")["id"], "Oracle DBA", "ack")
+    (inc,) = incidents(svc)
+    assert inc["diagnosis"]["status"] == "confirmed" and inc["plan"] is None   # plan waits for the engineer to agree
+    svc.act(ask(svc, "diagnosis")["id"], "Oracle DBA", "agree")
+    (inc,) = incidents(svc)
+    assert inc["plan"]["status"] == "proposed" and svc.world.actions == []
+
+
+def test_guided_dismissal_and_disagreement():
+    svc = guided_night(["S05"])
+    svc.act(ask(svc, "detect")["id"], "L1 Operator", "dismiss", "Vendor told us in advance")
+    assert incidents(svc) == []
+    svc = guided_night(["S02"])
+    svc.act(ask(svc, "detect")["id"], "L1 Operator", "confirm")
+    svc.act(ask(svc, "ack")["id"], "Informatica Engineer", "ack")
+    svc.act(ask(svc, "diagnosis")["id"], "Informatica Engineer", "disagree", "Blocker was a business job")
+    (inc,) = incidents(svc)
+    assert inc["plan"]["source"] == "engineer" and ask(svc, "manual")["to"] == "Informatica Engineer"
+
+
+@pytest.mark.parametrize("sid", [s["id"] for s in SCENARIOS])
+def test_every_scenario_recovers_step_by_step(sid):
+    from operatewithai.api import pipeline
+    svc = guided_night([sid])
+    for _ in range(400):
+        if not answer(svc) and not svc.run_to_next():
+            break
+    (inc,) = incidents(svc)
+    assert inc["state"] == "Resolved"
+    assert all("delivered" in s["status"] for s in svc.ops.projection["services"].values())
+    (issue,) = pipeline.build(svc.ops)["issues"]
+    assert [s["state"] for s in issue["stages"] if s["key"] not in ("inform",)] == ["done"] * 7

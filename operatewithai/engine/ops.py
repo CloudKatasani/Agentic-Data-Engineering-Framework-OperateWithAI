@@ -14,7 +14,7 @@ from ..store import Store
 OPEN_STATES = ("New", "Assigned", "In Progress", "On Hold")
 PREFIX = {"incident": ("INC", 41000), "request": ("RITM", 52000), "problem": ("PRB", 3000)}
 ESCALATE_TO = ["incident_manager", "sdm"]
-ESCALATING = ("ack", "plan", "approve", "manual", "blocked", "resolve", "comms", "major")   # incident work; requests and reviews wait
+ESCALATING = ("detect", "diagnosis", "ack", "plan", "approve", "manual", "blocked", "resolve", "comms", "major")   # incident work; requests and reviews wait
 
 
 class Refused(Exception):
@@ -26,6 +26,7 @@ class Ops:
         self.env, self.store, self.estate = env, store, estate
         self.kb = KB(store)
         self.projection: dict = {}
+        self.guided = False     # step-by-step mode: a person confirms every hand-off between agents
 
     @property
     def now(self) -> datetime:

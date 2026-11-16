@@ -20,7 +20,8 @@ from .store import Store
 
 HANDLERS = {"plan": resolution.decide, "approve": resolution.decide, "manual": resolution.decide, "blocked": resolution.decide,
             "resolve": resolution.decide, "comms": comms.decide, "approve_request": requests.decide,
-            "pir": knowledge.decide, "problem": knowledge.decide, "kedb": knowledge.decide}
+            "pir": knowledge.decide, "problem": knowledge.decide, "kedb": knowledge.decide,
+            "detect": triage.confirm, "diagnosis": diagnosis.decide}
 
 
 class Service:
@@ -30,7 +31,7 @@ class Service:
         self.runs = 0
         self.reset([])
 
-    def reset(self, scenarios: list[str], learned: Optional[list[dict]] = None) -> None:
+    def reset(self, scenarios: list[str], learned: Optional[list[dict]] = None, guided: bool = False) -> None:
         with self.lock:
             self.runs += 1
             self.env = Environment.load(self.client)
@@ -41,12 +42,28 @@ class Service:
             for ke in learned or []:
                 self.store.put("ke", ke)
             self.ops = Ops(self.env, self.store, self.world)
+            self.ops.guided = self.guided = guided
             batch_sla.run(self.ops)
             self.ops.audit("Service", "Night started", "", f"Scenarios: {', '.join(self.scenarios) or 'none'}")
 
-    def restart(self, scenarios: list[str]) -> None:
-        """Start a new night. Known errors the team has learned are kept."""
-        self.reset(scenarios, learned=self.store.all("ke"))
+    def restart(self, scenarios: list[str], guided: bool = False) -> None:
+        """Start a new night. Known errors the team has learned are kept. ``guided`` is the
+        step-by-step mode: a person confirms every hand-off from one agent to the next."""
+        self.reset(scenarios, learned=self.store.all("ke"), guided=guided)
+
+    def _signature(self) -> tuple:
+        return (len(self.store.all("note")), len(self.store.all("event")),
+                tuple((t["id"], t["state"], (t.get("plan") or {}).get("status")) for t in self.ops.tickets()))
+
+    def run_to_next(self, limit: str = "08:30") -> bool:
+        """Move the clock until something new happens (an alert, an ask, a ticket change).
+        Returns False when the night ended without anything new."""
+        end, before = hhmm(self.world.day, limit), self._signature()
+        while self.world.now < end:
+            self.cycle()
+            if self._signature() != before:
+                return True
+        return False
 
     # ------------------------------------------------------------------ the loop
     def _settle(self) -> None:
@@ -76,6 +93,12 @@ class Service:
         while self.world.now < end:
             self.cycle()
 
+    def run_to_first_issue(self) -> None:
+        """Start of a demo: move the clock until the Watch Desk Agent has something to show."""
+        while self.world.now.hour < 8 and not any(n["kind"] in ("detect", "ack", "plan") for n in self.ops.notes()):
+            if not self.run_to_next():
+                break
+
     # ------------------------------------------------------------------ people
     def act(self, note_id: str, actor: str, action: str, text: str = "") -> dict:
         with self.lock:
@@ -100,6 +123,7 @@ class Service:
                 HANDLERS[n["kind"]](ops, n, t, actor, action, text.strip())
             else:
                 ops.audit(actor, f"Read: {n['title']}"[:100], n["ticket"], human=True)
+            diagnosis.run(ops)
             self._settle()
             return n
 

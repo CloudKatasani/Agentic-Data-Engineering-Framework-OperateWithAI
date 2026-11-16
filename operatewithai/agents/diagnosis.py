@@ -36,7 +36,7 @@ def context(ops, inc: dict) -> dict:
 
 def run(ops) -> None:
     for inc in ops.tickets("incident", open_only=True):
-        if inc["diagnosis"]:
+        if inc["diagnosis"] or (ops.guided and not inc["ack_at"]):
             continue
         ev = ops.store.need("event", inc["root_event"])
         ke = ops.kb.get(inc["ke"])
@@ -69,3 +69,24 @@ def run(ops) -> None:
                  "recognised": f"Recognised as {inc['ke']}; no automated checks for it", "unconfirmed": "Known error matched but checks do not confirm it",
                  "unknown": "No known error matches; facts gathered for the engineer"}[status]
         ops.note(inc, NAME, f"{label}. {d['cause']}")
+        if ops.guided and status in ("confirmed", "likely", "recognised"):
+            lines = "\n".join(f"- {e['check']}: {e['result']}" + (" [confirms]" if e["confirms"] else "") for e in evidence)
+            ops.notify(inc["assignee"], "diagnosis", inc, f"Review the diagnosis for {inc['id']}: {ke['title']}",
+                       f"Cause ({status}): {d['cause']}\n\nWhat the read-only checks showed:\n{lines}",
+                       [{"id": "agree", "label": "Agree: build the fix plan", "style": "primary"},
+                        {"id": "disagree", "label": "Disagree: I will investigate", "input": "What does not fit", "required": True}],
+                       NAME, due_minutes=15, role="Assigned engineer")
+        else:
+            d["agreed_by"] = "not needed"
+            ops.save(inc)
+
+
+def decide(ops, n: dict, inc: dict, actor: str, action: str, text: str) -> None:
+    d = inc["diagnosis"]
+    d["agreed_by"] = actor
+    if action == "agree":
+        ops.note(inc, actor, "Agreed with the diagnosis", human=True)
+    else:
+        d["status"] = "unconfirmed"
+        d["cause"] = f"The engineer does not accept the known-error diagnosis: {text}"
+        ops.note(inc, actor, f"Disagreed with the diagnosis: {text}", human=True)

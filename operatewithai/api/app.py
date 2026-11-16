@@ -30,7 +30,8 @@ from .. import __version__
 from ..agents import llm, reporting, team
 from ..engine.ops import Refused
 from ..service import Service
-from ..sim.scenarios import PRESETS, SCENARIOS
+from ..sim.scenarios import BY_ID, PRESETS, SCENARIOS
+from . import pipeline
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -91,6 +92,8 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
             raise Refused(f"Your token identifies you as {name}; you cannot act as someone else.")
         if not name:
             raise Refused("Say who you are (X-Actor header).")
+        if ids and not request.state.actor:
+            raise Refused("A personal token is required to make decisions.")
         return name
 
     def ops():
@@ -249,12 +252,30 @@ def create_app(service: Optional[Service] = None, autotick: Optional[float] = No
         return {"ok": True}
 
     # ------------------------------------------------------------------ simulator
+    @app.get("/api/run")
+    def run_view():
+        with svc.lock:
+            out = pipeline.build(ops())
+        out["scenarios"] = [BY_ID[s] for s in svc.scenarios]
+        out["prevented"] = svc.world.prevented
+        return out
+
     @app.post("/api/sim/start")
     def sim_start(body: dict = Body(...)):
-        svc.restart([str(s) for s in body.get("scenarios", [])])
+        guided = body.get("mode", "guided") == "guided"
+        svc.restart([str(s) for s in body.get("scenarios", [])], guided=guided)
         if body.get("until"):
             svc.run_until(str(body["until"]))
-        return {"now": svc.now.isoformat(), "scenarios": svc.scenarios}
+        elif guided:
+            svc.run_to_first_issue()   # stop at the first thing the Watch Desk Agent detects
+        return {"now": svc.now.isoformat(), "scenarios": svc.scenarios, "guided": guided}
+
+    @app.post("/api/sim/next")
+    def sim_next():
+        if svc.now.hour >= 9:
+            raise HTTPException(409, "The night is over. Start a new night in the simulator.")
+        changed = svc.run_to_next()
+        return {"now": svc.now.isoformat(), "changed": changed}
 
     @app.post("/api/sim/advance")
     def sim_advance(body: dict = Body(...)):

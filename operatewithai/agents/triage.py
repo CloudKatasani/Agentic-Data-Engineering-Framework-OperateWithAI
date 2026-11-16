@@ -51,6 +51,39 @@ def _correlate(ops, ev: dict, ke) -> tuple[dict | None, str, bool]:
     return None, "", False
 
 
+def _hold(ops, ev: dict, ke) -> None:
+    """Step-by-step mode: the Watch Desk Agent shows what it detected and the L1 Operator
+    confirms it is real before a ticket is opened."""
+    waiting = [e for e in ops.store.all("event") if e.get("pending") and e["status"] == "open" and not e.get("pending_with")]
+    same = next((e for e in waiting if ke and not ke.get("symptom") and e.get("pending_ke") == ke["id"]), None)
+    if same:        # another tool reporting the same cause: shown with the first one, not asked twice
+        ev.update(pending=True, pending_with=same["id"], handling=f"Detected; same cause as {same['id']}, waiting for the L1 Operator")
+        ops.store.put("event", ev)
+        return
+    ev.update(pending=True, pending_ke=ke["id"] if ke else None, handling="Detected; waiting for the L1 Operator to confirm")
+    ops.store.put("event", ev)
+    ops.audit("Watch Desk Agent", f"Detected: {ev['message'][:90]}", ev["id"], f"{ev['source']} on {ev['ci']}; codes {' '.join(ev['codes']) or 'none'}")
+    ops.notify(ops.env.on_call("watch"), "detect", None, f"Detected on {ops.env.cis[ev['ci']]['name']}: {ev['message'][:110]}",
+               f"Tool: {ev['source']}\nSystem: {ev['ci']}\nFirst seen: {ev['first_seen'][11:16]}\nError codes: {' '.join(ev['codes']) or 'none'}\n\n{ev['message']}",
+               [{"id": "confirm", "label": "Real issue: send to triage", "style": "primary"}, {"id": "dismiss", "label": "Noise: dismiss", "input": "Why this is not an issue", "required": True}],
+               "Watch Desk Agent", due_minutes=10, step=int(ev["id"][2:]), role="L1 Operator", data={"event": ev["id"]})
+
+
+def confirm(ops, n: dict, _t, actor: str, action: str, text: str) -> None:
+    ev = ops.store.need("event", n["data"]["event"])
+    group = [ev] + [e for e in ops.store.all("event") if e.get("pending_with") == ev["id"] and e["status"] == "open"]
+    for e in group:
+        e["pending"] = False
+        if action == "confirm":
+            e["confirmed_by"] = actor
+        else:
+            e.update(status="suppressed", handling=f"Dismissed as noise by the {actor}: {text}")
+        ops.store.put("event", e)
+    ops.audit(actor, ("Confirmed as a real issue" if action == "confirm" else f"Dismissed as noise: {text}"), ev["id"], ev["message"], human=True)
+    if action == "confirm":
+        run(ops, group)
+
+
 def run(ops, new_events: list[dict]) -> None:
     env = ops.env
     for ev in new_events:
@@ -72,6 +105,9 @@ def run(ops, new_events: list[dict]) -> None:
                 inc["impact_nodes"] = _impact_nodes(env, inc["root_nodes"])
                 inc["services"] = sorted(set(inc["services"]) | set(_services(ops, inc["root_nodes"])))
             ops.note(inc, NAME, f"Added {ev['source']} alert on {ev['entity']} to this incident: {why}. No new ticket.")
+            continue
+        if ops.guided and not ev.get("confirmed_by"):
+            _hold(ops, ev, ke)
             continue
         roots = [ev["node"]] if ev["node"] else env.nodes_of_ci(ev["ci"])
         services = _services(ops, roots)

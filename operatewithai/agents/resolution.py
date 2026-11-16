@@ -50,7 +50,7 @@ def _manual_plan(ops, inc: dict, why: str) -> None:
 
 def propose(ops) -> None:
     for inc in ops.tickets("incident", open_only=True):
-        if inc["plan"] or not inc["diagnosis"]:
+        if inc["plan"] or not inc["diagnosis"] or (ops.guided and not inc["diagnosis"].get("agreed_by")):
             continue
         ke, d = ops.kb.get(inc["ke"]), inc["diagnosis"]
         usable = ke and d["status"] in ("confirmed", "likely", "recognised")

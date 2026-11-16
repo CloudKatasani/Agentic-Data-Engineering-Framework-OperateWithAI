@@ -15,8 +15,8 @@ let META = null, PULSE = "", ACTIONS = {};
 const me = () => META?.me || store.get("owai_me", "");
 
 // ------------------------------------------------------------------ api + ui helpers
-async function api(method, path, body) {
-  const headers = { "X-Actor": me() };
+async function api(method, path, body, as) {
+  const headers = { "X-Actor": as || me() };
   const token = store.get("owai_token", "");
   if (token) headers.Authorization = "Bearer " + token;
   const opts = { method, headers };
@@ -90,11 +90,12 @@ function md(src) {
 
 // ------------------------------------------------------------------ asks (notifications) and actions
 function askCard(n, opts = {}) {
-  const mine = [n.to, n.escalated_to].includes(me());
+  const seat = n.escalated_to || n.to;
+  const mine = opts.asSeat || [n.to, n.escalated_to].includes(me());
   const late = n.status === "open" && n.escalated_to;
   ACTIONS[n.id] = n;
   const buttons = n.status !== "open" ? `<span class="muted small">${esc(n.done_by ? `${n.done_by}: ${n.done_action}` : n.done_action || n.status)}</span>`
-    : mine ? n.actions.map((a) => `<button class="btn small ${a.style === "primary" ? "primary" : a.style === "bad" ? "bad" : ""}" data-act="${esc(n.id)}|${esc(a.id)}">${esc(a.label)}</button>`).join(" ")
+    : mine ? n.actions.map((a) => `<button class="btn small ${a.style === "primary" ? "primary" : a.style === "bad" ? "bad" : ""}" data-act="${esc(n.id)}|${esc(a.id)}|${opts.asSeat ? esc(seat) : ""}">${esc(a.label)}${opts.asSeat ? ` <span style="opacity:.75;font-weight:400">· as the ${esc(seat)}</span>` : ""}</button>`).join(" ")
       : `<span class="muted small">Waiting for ${esc(n.escalated_to || n.to)}</span>`;
   return `<div class="card ask ${n.kind === "fyi" ? "fyi" : ""} ${late ? "late" : ""}">
     <div class="meta">${n.priority && n.ticket ? pri(n.priority) : ""}<span class="who ai">Agent</span>${esc(n.agent)} asks the ${esc(n.to)}
@@ -108,11 +109,11 @@ function askCard(n, opts = {}) {
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
-  const [id, actionId] = b.dataset.act.split("|");
+  const [id, actionId, seat] = b.dataset.act.split("|");
   const n = ACTIONS[id];
   const a = n.actions.find((x) => x.id === actionId);
   const send = async (text) => {
-    await guard(() => api("POST", "/inbox/" + id, { action: actionId, text }), "Recorded: " + a.label);
+    await guard(() => api("POST", "/inbox/" + id, { action: actionId, text }, seat), "Recorded: " + a.label + (seat ? " (as the " + seat + ")" : ""));
     closeModal(); PULSE = ""; render();
   };
   if (!a.input) return send("");
@@ -125,7 +126,7 @@ document.addEventListener("click", async (e) => {
 
 // ------------------------------------------------------------------ routing
 const routes = {};
-const AUTO = ["home", "inbox", "incidents", "ticket", "batch", "requests"];
+const AUTO = ["home", "inbox", "incidents", "ticket", "batch", "requests", "run"];
 function current() { const [, name = "team", ...args] = location.hash.split("/"); return [routes[name] ? name : "team", args.map(decodeURIComponent)]; }
 async function render(quiet) {
   const [name, args] = current();
@@ -416,17 +417,50 @@ routes.audit = async () => {
 // ------------------------------------------------------------------ simulator
 routes.simulator = async () => {
   META = await api("GET", "/meta");
-  main().innerHTML = `<h1>Scenario simulator</h1><div class="sub">A simulated night at the demo client. Tools report in their own formats; nothing here is real client data. Pick what goes wrong, start the night, then move the clock and answer your inbox as different people.</div>
+  main().innerHTML = `<h1>Scenario simulator</h1><div class="sub">A simulated night at the demo client. Tools report in their own formats; nothing here is real client data. Pick what goes wrong and start the night. The live run then shows each agent's output in turn and waits for the right person before the next agent takes over.</div>
     <div class="card"><div class="row">${Object.entries(META.presets).map(([id, p]) => `<button class="btn" data-preset="${id}">${esc(p.title)}</button>`).join("")}<span class="sp"></span>
-      <label style="margin:0">Start at</label><select id="simUntil" style="width:auto">${["00:30", "01:20", "02:40", "05:10"].map((t) => `<option ${t === "01:20" ? "selected" : ""}>${t}</option>`).join("")}</select>
+      <select id="simMode" style="width:auto"><option value="guided">Step by step: a person confirms every hand-off</option><option value="fast">Fast: agents hand off, people approve plans and fixes</option></select>
       <button class="btn primary" id="simGo">Start a new night</button></div>
       ${META.scenarios.map((s) => `<label class="scn"><input type="checkbox" value="${s.id}" ${META.running.includes(s.id) ? "checked" : ""}><span><b>${s.id} · ${esc(s.title)}</b> ${s.tools.map((t) => badge(t)).join(" ")}<br><span class="muted">${esc(s.story)}</span></span></label>`).join("")}
       <p class="muted small">Known errors the team has added stay in place across nights, so running S08 twice shows the second occurrence being recognised.</p></div>`;
   $$("[data-preset]").forEach((b) => { b.onclick = () => $$(".scn input").forEach((c) => { c.checked = META.presets[b.dataset.preset].scenarios.includes(c.value); }); });
   $("#simGo").onclick = async () => {
-    await guard(() => api("POST", "/sim/start", { scenarios: $$(".scn input:checked").map((c) => c.value), until: $("#simUntil").value }), "New night started");
-    META = await api("GET", "/meta"); location.hash = "#/home";
+    await guard(() => api("POST", "/sim/start", { scenarios: $$(".scn input:checked").map((c) => c.value), mode: $("#simMode").value }), "Night started");
+    META = await api("GET", "/meta"); location.hash = "#/run";
   };
+};
+
+// ------------------------------------------------------------------ live run, step by step
+routes.run = async () => {
+  const r = await api("GET", "/run");
+  const LBL = { done: "done", waiting: "waiting for a person", working: "agent working", blocked: "stopped", pending: "", skipped: "not needed" };
+  const stage = (st, i) => `<div class="stage ${st.state}"><div class="num">${i + 1}</div><div>
+      <h4>${esc(st.title)} <span class="who ai">Agent</span><span style="font-weight:400">${esc(st.agent)}</span> ${badge(LBL[st.state], { done: "b-ok", waiting: "b-warn", working: "b-info", blocked: "b-bad" }[st.state])}</h4>
+      <div class="muted small">${esc(st.does)}</div>
+      ${st.output.length ? `<ul>${st.output.map((o) => `<li>${esc(o)}</li>`).join("")}</ul>` : ""}
+      ${st.people ? `<div class="hum"><span class="who hu">Person</span>${esc(st.people)}</div>` : ""}
+      ${st.asks.map((n) => askCard(n, { asSeat: true, noLink: true })).join("")}</div></div>`;
+  const busy = (i) => i.state !== "Resolved" || i.stages.some((st) => st.asks.length);
+  const issue = (i) => { const shown = i.stages.filter((st) => !["pending", "skipped"].includes(st.state)); return `<div class="card">
+      <div class="spread"><h3 style="margin:0">${i.priority ? pri(i.priority) + " " : ""}${i.ticket ? `<a href="#/ticket/${esc(i.ticket)}">${esc(i.ticket)}</a> · ` : ""}${esc(i.title)}</h3>${badge(i.state, STATE_CLS[i.state] || "b-warn")}</div>
+      <div class="rail">${i.stages.map((st, n) => `<span class="${st.state}">${n + 1} ${esc(st.title)}</span>`).join("")}</div>
+      ${!busy(i) ? `<details><summary class="small muted">Show the ${shown.length} completed stages</summary>${shown.map((st) => stage(st, i.stages.indexOf(st))).join("")}</details>`
+        : i.state === "Resolved" ? `<details><summary class="small muted">Show the completed stages</summary>${shown.filter((st) => !st.asks.length).map((st) => stage(st, i.stages.indexOf(st))).join("")}</details>${shown.filter((st) => st.asks.length).map((st) => stage(st, i.stages.indexOf(st))).join("")}`
+          : shown.map((st) => stage(st, i.stages.indexOf(st))).join("")}</div>`; };
+  const open = r.issues.filter(busy), closed = r.issues.filter((i) => !busy(i));
+  const next = r.waiting ? `<div class="nextbar hu"><div><b>${r.waiting} decision${r.waiting > 1 ? "s" : ""} waiting on people.</b><div class="small">Each button below answers as the role the agent asked. The next agent starts as soon as the person has decided.</div></div></div>`
+    : r.over ? `<div class="nextbar ok"><div><b>The night is over.</b><div class="small">${r.services.map((x) => `${esc(x.name)}: ${esc(x.status)}`).join(" · ")}</div></div><a class="btn" href="#/simulator">Start another night</a></div>`
+      : `<div class="nextbar"><div><b>${r.issues.length ? "The agents are working; nothing is waiting on a person." : "Quiet so far: the Watch Desk Agent has found nothing to report."}</b><div class="small">Move the clock to the next thing that happens.</div></div><button class="btn primary" id="runNext">Continue to the next event</button></div>`;
+  main().innerHTML = `<div class="spread"><div><h1>Live run</h1><div class="sub">${r.guided ? "Step by step: a person confirms every hand-off from one agent to the next" : "Fast mode: agents hand off to each other; people approve plans, fixes and messages"} · ${r.watch.raw || 0} tool reports read so far</div></div>
+      <div class="row">${r.services.map((x) => `<span title="${esc(x.name)} · due ${hm(x.deadline)} · estimate ${hm(x.eta)}">${badge(x.name.split(" (")[0] + ": " + x.status, SVC_CLS[x.status])}</span>`).join(" ")}</div></div>
+    ${r.scenarios.length ? `<details style="margin-bottom:12px"><summary class="small muted">What goes wrong tonight (${r.scenarios.map((x) => x.id).join(", ")})</summary>${r.scenarios.map((x) => `<p class="small"><b>${esc(x.title)}.</b> ${esc(x.story)}</p>`).join("")}</details>` : ""}
+    ${next}
+    ${r.prevented.length ? `<div class="nextbar ok"><div><b>Prevented: the Oracle service account never expired.</b><div class="small">The Service Request Agent raised the rotation 9 days early and the Security Lead approved it, so the GoldenGate and Informatica failures of scenario S03 did not happen.</div></div></div>` : ""}
+    ${open.map(issue).join("")}
+    ${r.other_asks.length ? `<h2>Other decisions waiting</h2>${r.other_asks.map((n) => askCard(n, { asSeat: true })).join("")}` : ""}
+    ${closed.length ? `<h2>Resolved tonight (${closed.length})</h2>${closed.map(issue).join("")}` : ""}`;
+  const btn = $("#runNext");
+  if (btn) btn.onclick = async () => { btn.disabled = true; btn.textContent = "Moving the clock…"; await guard(() => api("POST", "/sim/next")); PULSE = ""; render(true); };
 };
 
 // ------------------------------------------------------------------ boot
